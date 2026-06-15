@@ -1,0 +1,732 @@
+{
+  "address": "CpfKbjko2E5QRizDfhionhFW3awEfEvK6CKe1KZwQEiB",
+  "metadata": {
+    "name": "agrifund",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "claim_yield",
+      "discriminator": [
+        49,
+        74,
+        111,
+        7,
+        186,
+        22,
+        61,
+        165
+      ],
+      "accounts": [
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "investor",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "investor_receipt_account",
+          "writable": true
+        },
+        {
+          "name": "receipt_mint",
+          "writable": true
+        },
+        {
+          "name": "pool_token_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "investor_token_account",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "fund_yield",
+      "docs": [
+        "Fund the pool with USDC (real SPL Token transfer).",
+        "",
+        "* `amount_usdc` – amount of micro-USDC being contributed"
+      ],
+      "discriminator": [
+        114,
+        176,
+        26,
+        168,
+        64,
+        230,
+        10,
+        223
+      ],
+      "accounts": [
+        {
+          "name": "yield_pool",
+          "docs": [
+            "The existing YieldPool to fund."
+          ],
+          "writable": true
+        },
+        {
+          "name": "investor_token_account",
+          "docs": [
+            "The investor's token account (from which funds will be drawn)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "pool_token_vault",
+          "docs": [
+            "The pool's token vault (into which funds will be deposited)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yield_pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "receipt_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  99,
+                  101,
+                  105,
+                  112,
+                  116,
+                  95,
+                  109,
+                  105,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yield_pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "investor_receipt_account",
+          "writable": true
+        },
+        {
+          "name": "funder",
+          "docs": [
+            "The funder (must sign the transaction)."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "token_program",
+          "docs": [
+            "Required for token transfers."
+          ],
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount_usdc",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "initialize_pool",
+      "docs": [
+        "Initialise a new YieldPool.",
+        "",
+        "* `crop_name`       - name of the crop",
+        "* `total_yield_kg`  – total agricultural yield represented (in kg)",
+        "* `price_per_kg`    – price in micro-USDC per kg (e.g. 1_000_000 = $1)"
+      ],
+      "discriminator": [
+        95,
+        180,
+        10,
+        172,
+        84,
+        174,
+        232,
+        40
+      ],
+      "accounts": [
+        {
+          "name": "yield_pool",
+          "docs": [
+            "The new YieldPool account to be created (PDA or keypair)."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "pool_token_vault",
+          "docs": [
+            "The PDA token vault for this pool."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yield_pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "receipt_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  99,
+                  101,
+                  105,
+                  112,
+                  116,
+                  95,
+                  109,
+                  105,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yield_pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_mint",
+          "docs": [
+            "The SPL token mint (e.g., our test AgriUSD)."
+          ]
+        },
+        {
+          "name": "authority",
+          "docs": [
+            "The signer who pays for account rent and becomes the authority."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "docs": [
+            "Required by Anchor for account initialisation."
+          ],
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "estate_name",
+          "type": "string"
+        },
+        {
+          "name": "crop_name",
+          "type": "string"
+        },
+        {
+          "name": "category",
+          "type": "string"
+        },
+        {
+          "name": "total_yield_kg",
+          "type": "u64"
+        },
+        {
+          "name": "price_per_kg",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "refund_investment",
+      "discriminator": [
+        235,
+        4,
+        250,
+        47,
+        166,
+        80,
+        39,
+        112
+      ],
+      "accounts": [
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "investor",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "investor_receipt_account",
+          "writable": true
+        },
+        {
+          "name": "receipt_mint",
+          "writable": true
+        },
+        {
+          "name": "pool_token_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "investor_token_account",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "refund_amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "settle_pool",
+      "discriminator": [
+        186,
+        11,
+        231,
+        111,
+        242,
+        241,
+        203,
+        64
+      ],
+      "accounts": [
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool_token_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "estate_token_account",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "repayment_amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "trigger_default",
+      "discriminator": [
+        101,
+        124,
+        194,
+        181,
+        119,
+        246,
+        180,
+        8
+      ],
+      "accounts": [
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "pool"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "withdraw_capital",
+      "discriminator": [
+        82,
+        32,
+        82,
+        118,
+        160,
+        116,
+        65,
+        104
+      ],
+      "accounts": [
+        {
+          "name": "pool",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "pool"
+          ]
+        },
+        {
+          "name": "pool_token_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "pool"
+              }
+            ]
+          }
+        },
+        {
+          "name": "estate_token_account",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "clock",
+          "address": "SysvarC1ock11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "YieldPool",
+      "discriminator": [
+        118,
+        216,
+        37,
+        206,
+        197,
+        189,
+        27,
+        100
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "PoolClosed",
+      "msg": "The yield pool is closed and no longer accepting funds."
+    },
+    {
+      "code": 6001,
+      "name": "Overflow",
+      "msg": "Arithmetic overflow when accumulating funded USDC."
+    },
+    {
+      "code": 6002,
+      "name": "Overfunded",
+      "msg": "Funding amount exceeds the maximum pool capacity."
+    },
+    {
+      "code": 6003,
+      "name": "CropNameTooLong",
+      "msg": "Crop name exceeds 32 characters maximum."
+    },
+    {
+      "code": 6004,
+      "name": "VestingLocked",
+      "msg": "Requested amount exceeds the currently vested available capital."
+    },
+    {
+      "code": 6005,
+      "name": "InvalidState",
+      "msg": "The pool is not in a withdrawable state."
+    },
+    {
+      "code": 6006,
+      "name": "GoalNotMet",
+      "msg": "The funding goal has not been reached yet."
+    },
+    {
+      "code": 6007,
+      "name": "NoReceiptsSupply",
+      "msg": "No receipt token supply found."
+    }
+  ],
+  "types": [
+    {
+      "name": "PoolStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Open"
+          },
+          {
+            "name": "Farming"
+          },
+          {
+            "name": "Settled"
+          },
+          {
+            "name": "Defaulted"
+          }
+        ]
+      }
+    },
+    {
+      "name": "YieldPool",
+      "docs": [
+        "The on-chain state for a single agricultural yield pool."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "docs": [
+              "The farmer / admin who created this pool."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "estate_name",
+            "docs": [
+              "The name of the estate (e.g., \"Mendez Agro Holdings\")"
+            ],
+            "type": "string"
+          },
+          {
+            "name": "crop_name",
+            "docs": [
+              "The type of crop (e.g., \"Basmati Rice\")"
+            ],
+            "type": "string"
+          },
+          {
+            "name": "category",
+            "docs": [
+              "The crop category (e.g., \"Grains\")"
+            ],
+            "type": "string"
+          },
+          {
+            "name": "vault_bump",
+            "docs": [
+              "The bump seed used to derive the PDA token vault"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "total_yield_kg",
+            "docs": [
+              "Total yield represented by this pool, in kilograms."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "price_per_kg",
+            "docs": [
+              "Price per kg in micro-USDC (1 USDC = 1_000_000 units)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "total_funded_usdc",
+            "docs": [
+              "Cumulative USDC funded into the pool (in micro-USDC)."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "is_active",
+            "docs": [
+              "Whether the pool is still accepting funds."
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "status",
+            "docs": [
+              "Current status of the pool"
+            ],
+            "type": {
+              "defined": {
+                "name": "PoolStatus"
+              }
+            }
+          },
+          {
+            "name": "farming_start_time",
+            "docs": [
+              "Timestamp when farming/drawdown started"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "amount_withdrawn",
+            "docs": [
+              "Amount drawn down/withdrawn by estate authority"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "receipt_mint",
+            "docs": [
+              "Specific receipt token mint for this pool"
+            ],
+            "type": "pubkey"
+          }
+        ]
+      }
+    }
+  ]
+}
