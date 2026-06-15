@@ -88,7 +88,7 @@ export default function LandingPage() {
           Real-World Asset Protocol · Built on Solana
         </div>
 
-        <h1 className="mx-auto max-w-4xl text-4xl sm:text-5xl md:text-7xl font-extrabold tracking-tight leading-tight break-words text-balance text-white">
+        <h1 className="w-full max-w-[100vw] px-4 mx-auto text-3xl sm:text-5xl md:text-7xl font-bold tracking-tight leading-tight break-words text-balance text-white">
           Tokenized
           <span className="relative mx-3">
             <span className="relative z-10 bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-400 bg-clip-text text-transparent">
