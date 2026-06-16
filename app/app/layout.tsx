@@ -9,6 +9,9 @@ export const metadata: Metadata = {
   title: 'AgriFund — Agri-Fi Yield Tokenization Protocol',
   description: 'Tokenize agricultural yield on Solana. Connect verified farming estates with institutional investors through transparent, on-chain USDC funding pools.',
   keywords: ['Solana', 'DeFi', 'Agriculture', 'Yield', 'Tokenization', 'Web3', 'RWA'],
+  icons: {
+    icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🌾</text></svg>',
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
