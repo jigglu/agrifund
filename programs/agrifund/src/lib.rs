@@ -45,15 +45,77 @@ pub mod agrifund {
         total_yield_kg: u64,
         price_per_kg: u64,
     ) -> Result<()> {
+        require_keys_eq!(ctx.accounts.token_metadata_program.key(), anchor_spl::metadata::ID);
+        require_keys_eq!(ctx.accounts.rent.key(), anchor_lang::solana_program::sysvar::rent::ID);
+
+        let (metadata_derived, _bump) = Pubkey::find_program_address(
+            &[
+                b"metadata",
+                ctx.accounts.token_metadata_program.key.as_ref(),
+                ctx.accounts.receipt_mint.key().as_ref(),
+            ],
+            ctx.accounts.token_metadata_program.key,
+        );
+        require_keys_eq!(ctx.accounts.metadata.key(), metadata_derived);
+
+        let pool_key = ctx.accounts.yield_pool.key();
         require!(crop_name.len() <= 32, ErrorCode::CropNameTooLong);
+
+        // Derive and verify vault PDA manually
+        let (vault_derived, vault_bump) = Pubkey::find_program_address(
+            &[b"vault", pool_key.as_ref()],
+            ctx.program_id,
+        );
+        require_keys_eq!(ctx.accounts.pool_token_vault.key(), vault_derived);
+
+        // Initialize pool_token_vault if it has not been created yet
+        if ctx.accounts.pool_token_vault.owner == &anchor_lang::solana_program::system_program::ID {
+            let rent = Rent::get()?;
+            let lamports = rent.minimum_balance(165);
+
+            let vault_seeds = &[
+                b"vault".as_ref(),
+                pool_key.as_ref(),
+                &[vault_bump],
+            ];
+            let signer_seeds = &[&vault_seeds[..]];
+
+            anchor_lang::solana_program::program::invoke_signed(
+                &anchor_lang::solana_program::system_instruction::create_account(
+                    ctx.accounts.authority.key,
+                    ctx.accounts.pool_token_vault.key,
+                    lamports,
+                    165,
+                    ctx.accounts.token_program.key,
+                ),
+                &[
+                    ctx.accounts.authority.to_account_info(),
+                    ctx.accounts.pool_token_vault.to_account_info(),
+                    ctx.accounts.system_program.to_account_info(),
+                ],
+                signer_seeds,
+            )?;
+
+            let cpi_accounts = anchor_spl::token::InitializeAccount {
+                account: ctx.accounts.pool_token_vault.to_account_info(),
+                mint: ctx.accounts.token_mint.to_account_info(),
+                authority: ctx.accounts.pool_token_vault.to_account_info(),
+                rent: ctx.accounts.rent.to_account_info(),
+            };
+            let cpi_ctx = CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                cpi_accounts,
+            );
+            anchor_spl::token::initialize_account(cpi_ctx)?;
+        }
 
         let pool = &mut ctx.accounts.yield_pool;
 
         pool.authority         = ctx.accounts.authority.key();
         pool.estate_name       = estate_name;
         pool.crop_name         = crop_name;
-        pool.category          = category;
-        pool.vault_bump        = ctx.bumps.pool_token_vault;
+        pool.category          = category.clone();
+        pool.vault_bump        = vault_bump;
         pool.total_yield_kg    = total_yield_kg;
         pool.price_per_kg      = price_per_kg;
         pool.total_funded_usdc = 0;
@@ -62,6 +124,50 @@ pub mod agrifund {
         pool.farming_start_time = 0;
         pool.amount_withdrawn  = 0;
         pool.receipt_mint      = ctx.accounts.receipt_mint.key();
+
+        // Derive dynamic metadata name: "agri" + category (e.g. agriGrain)
+        let metadata_name = format!("agri{}", category);
+        let metadata_symbol = String::from("AGRI");
+        let metadata_uri = String::from("");
+
+        let cpi_program = ctx.accounts.token_metadata_program.to_account_info();
+
+        let cpi_accounts = anchor_spl::metadata::CreateMetadataAccountsV3 {
+            metadata: ctx.accounts.metadata.to_account_info(),
+            mint: ctx.accounts.receipt_mint.to_account_info(),
+            mint_authority: ctx.accounts.receipt_mint.to_account_info(),
+            payer: ctx.accounts.authority.to_account_info(),
+            update_authority: ctx.accounts.authority.to_account_info(),
+            system_program: ctx.accounts.system_program.to_account_info(),
+            rent: ctx.accounts.rent.to_account_info(),
+        };
+
+        let seeds = &[
+            b"receipt_mint".as_ref(),
+            pool_key.as_ref(),
+            &[ctx.bumps.receipt_mint],
+        ];
+        let signer_seeds = &[&seeds[..]];
+
+        let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer_seeds);
+
+        let data = anchor_spl::metadata::mpl_token_metadata::types::DataV2 {
+            name: metadata_name,
+            symbol: metadata_symbol,
+            uri: metadata_uri,
+            seller_fee_basis_points: 0,
+            creators: None,
+            collection: None,
+            uses: None,
+        };
+
+        anchor_spl::metadata::create_metadata_accounts_v3(
+            cpi_ctx,
+            data,
+            false, // is_mutable
+            true, // update_authority_is_signer
+            None, // collection_details
+        )?;
 
         msg!(
             "YieldPool initialised: authority={}, estate={}, crop={}, category={}, yield_kg={}, price_per_kg={}",
@@ -380,7 +486,6 @@ pub struct YieldPool {
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Accounts)]
-#[instruction(estate_name: String, crop_name: String, category: String, total_yield_kg: u64, price_per_kg: u64)]
 pub struct InitializePool<'info> {
     /// The new YieldPool account to be created (PDA or keypair).
     #[account(
@@ -388,18 +493,11 @@ pub struct InitializePool<'info> {
         payer = authority,
         space = YIELD_POOL_SPACE
     )]
-    pub yield_pool: Account<'info, YieldPool>,
+    pub yield_pool: Box<Account<'info, YieldPool>>,
 
-    /// The PDA token vault for this pool.
-    #[account(
-        init,
-        payer = authority,
-        seeds = [b"vault", yield_pool.key().as_ref()],
-        bump,
-        token::mint = token_mint,
-        token::authority = pool_token_vault,
-    )]
-    pub pool_token_vault: Account<'info, TokenAccount>,
+    /// CHECK: The PDA token vault for this pool (manually initialized).
+    #[account(mut)]
+    pub pool_token_vault: AccountInfo<'info>,
 
     #[account(
         init,
@@ -411,8 +509,12 @@ pub struct InitializePool<'info> {
     )]
     pub receipt_mint: Account<'info, Mint>,
 
-    /// The SPL token mint (e.g., our test AgriUSD).
-    pub token_mint: Account<'info, Mint>,
+    /// CHECK: Metaplex metadata PDA
+    #[account(mut)]
+    pub metadata: AccountInfo<'info>,
+
+    /// CHECK: The SPL token mint (e.g., our test AgriUSD).
+    pub token_mint: AccountInfo<'info>,
 
     /// The signer who pays for account rent and becomes the authority.
     #[account(mut)]
@@ -421,7 +523,12 @@ pub struct InitializePool<'info> {
     /// Required by Anchor for account initialisation.
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
-    pub rent: Sysvar<'info, Rent>,
+
+    /// CHECK: Metaplex Program
+    pub token_metadata_program: AccountInfo<'info>,
+
+    /// CHECK: Rent sysvar
+    pub rent: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
