@@ -1,7 +1,9 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer, MintTo, Burn};
+use anchor_spl::metadata::{create_metadata_accounts_v3, CreateMetadataAccountsV3, Metadata};
+use anchor_spl::metadata::mpl_token_metadata::types::DataV2;
 
-declare_id!("CpfKbjko2E5QRizDfhionhFW3awEfEvK6CKe1KZwQEiB");
+declare_id!("9RVR31qnjswGMc4fYHpdNK5xxUsN2oxf5YfUB6ErxP7B");
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq)]
 pub enum PoolStatus {
@@ -72,6 +74,53 @@ pub mod agrifund {
             pool.total_yield_kg,
             pool.price_per_kg
         );
+
+        // CPI to Metaplex Token Metadata program to create metadata for receipt_mint
+        let cpi_program = ctx.accounts.token_metadata_program.to_account_info();
+        let cpi_accounts = CreateMetadataAccountsV3 {
+            metadata: ctx.accounts.metadata.to_account_info(),
+            mint: ctx.accounts.receipt_mint.to_account_info(),
+            mint_authority: ctx.accounts.receipt_mint.to_account_info(),
+            payer: ctx.accounts.authority.to_account_info(),
+            update_authority: ctx.accounts.receipt_mint.to_account_info(),
+            system_program: ctx.accounts.system_program.to_account_info(),
+            rent: ctx.accounts.rent.to_account_info(),
+        };
+
+        let pool_key = pool.key();
+        let seeds = &[
+            b"receipt_mint",
+            pool_key.as_ref(),
+            &[ctx.bumps.receipt_mint],
+        ];
+        let signer_seeds = &[&seeds[..]];
+        let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer_seeds);
+
+        // Name: "agri" + category + " Token" (capped at 32 chars)
+        let token_name = format!("agri{} Token", pool.category);
+        
+        // Symbol: "agri" + category (first 4 letters, capitalized)
+        let clean_category: String = pool.category
+            .chars()
+            .filter(|c| c.is_alphabetic())
+            .collect::<String>()
+            .chars()
+            .take(4)
+            .collect::<String>()
+            .to_uppercase();
+        let token_symbol = format!("agri{}", clean_category);
+
+        let data = DataV2 {
+            name: token_name,
+            symbol: token_symbol,
+            uri: "".to_string(),
+            seller_fee_basis_points: 0,
+            creators: None,
+            collection: None,
+            uses: None,
+        };
+
+        create_metadata_accounts_v3(cpi_ctx, data, true, true, None)?;
 
         Ok(())
     }
@@ -413,6 +462,21 @@ pub struct InitializePool<'info> {
 
     /// The SPL token mint (e.g., our test AgriUSD).
     pub token_mint: Account<'info, Mint>,
+
+    /// CHECK: Metaplex metadata account PDA
+    #[account(
+        mut,
+        seeds = [
+            b"metadata",
+            token_metadata_program.key().as_ref(),
+            receipt_mint.key().as_ref()
+        ],
+        bump,
+        seeds::program = token_metadata_program.key()
+    )]
+    pub metadata: AccountInfo<'info>,
+
+    pub token_metadata_program: Program<'info, Metadata>,
 
     /// The signer who pays for account rent and becomes the authority.
     #[account(mut)]

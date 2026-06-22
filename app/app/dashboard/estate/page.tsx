@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { PublicKey } from '@solana/web3.js';
+import { BN } from '@coral-xyz/anchor';
 import { useAgriFund, OnChainPool } from '@/hooks/useAgriFund';
 
 const AUTHORIZED_ADMINS = ["GosHAi7SeWs3Xv6Ys4aaw68DwHafbGqgZ8KPcVcDUBT2"];
@@ -107,6 +108,18 @@ export default function EstatePage() {
     refreshMyPools();
   }, [refreshMyPools]);
 
+  const refreshWithRetry = useCallback(async () => {
+    await refreshMyPools();
+
+    setTimeout(async () => {
+      await refreshMyPools();
+    }, 1000);
+
+    setTimeout(async () => {
+      await refreshMyPools();
+    }, 2500);
+  }, [refreshMyPools]);
+
   // ── Helpers ───────────────────────────────────────────────────────────────
   const addLog = useCallback((log: Omit<TxLog, 'id'>) => {
     const id = Math.random().toString(36).slice(2);
@@ -150,8 +163,8 @@ export default function EstatePage() {
       setCustomYieldKg("");
       setCustomPrice("");
 
-      // Re-fetch active admin pools
-      await refreshMyPools();
+      // Re-fetch active admin pools with retries
+      await refreshWithRetry();
     } catch (e: unknown) {
       updateLog(logId, {
         status: 'error',
@@ -174,7 +187,27 @@ export default function EstatePage() {
     try {
       const { txSig } = await withdrawCapital(poolAddress, amount);
       updateLog(logId, { status: 'success', sig: txSig });
-      await refreshMyPools();
+
+      // Optimistically update the local pool state immediately upon success
+      setMyPools(prev => prev.map(pool => {
+        if (pool.publicKey.toBase58() === key) {
+          const currentAmountWithdrawn = pool.account.amountWithdrawn.toNumber();
+          const nextStatus = amount === 0 ? { farming: {} } : pool.account.status;
+          const nextFarmingStartTime = amount === 0 ? new BN(Math.floor(Date.now() / 1000)) : pool.account.farmingStartTime;
+          return {
+            ...pool,
+            account: {
+              ...pool.account,
+              status: nextStatus,
+              farmingStartTime: nextFarmingStartTime,
+              amountWithdrawn: new BN(currentAmountWithdrawn + amount)
+            }
+          };
+        }
+        return pool;
+      }));
+
+      await refreshWithRetry();
     } catch (e: unknown) {
       updateLog(logId, {
         status: 'error',
@@ -204,7 +237,22 @@ export default function EstatePage() {
       const { txSig } = await settlePool(poolAddress, amountUsdc);
       updateLog(logId, { status: 'success', sig: txSig });
       setRepaymentAmounts(prev => ({ ...prev, [key]: "" }));
-      await refreshMyPools();
+
+      // Optimistically update status to settled
+      setMyPools(prev => prev.map(pool => {
+        if (pool.publicKey.toBase58() === key) {
+          return {
+            ...pool,
+            account: {
+              ...pool.account,
+              status: { settled: {} }
+            }
+          };
+        }
+        return pool;
+      }));
+
+      await refreshWithRetry();
     } catch (e: unknown) {
       updateLog(logId, {
         status: 'error',
@@ -228,7 +276,22 @@ export default function EstatePage() {
     try {
       const { txSig } = await triggerDefault(poolAddress);
       updateLog(logId, { status: 'success', sig: txSig });
-      await refreshMyPools();
+
+      // Optimistically update status to defaulted
+      setMyPools(prev => prev.map(pool => {
+        if (pool.publicKey.toBase58() === key) {
+          return {
+            ...pool,
+            account: {
+              ...pool.account,
+              status: { defaulted: {} }
+            }
+          };
+        }
+        return pool;
+      }));
+
+      await refreshWithRetry();
     } catch (e: unknown) {
       updateLog(logId, {
         status: 'error',
@@ -472,12 +535,21 @@ export default function EstatePage() {
                                   </div>
                                   <button
                                     onClick={() => handleSettle(pool.publicKey)}
-                                    disabled={!!isSettlingMap[pool.publicKey.toBase58()] || !repaymentAmounts[pool.publicKey.toBase58()]}
+                                    disabled={
+                                      !!isSettlingMap[pool.publicKey.toBase58()] || 
+                                      !repaymentAmounts[pool.publicKey.toBase58()] ||
+                                      (isFarming && amountWithdrawn < totalFunded)
+                                    }
                                     className="rounded-lg bg-gradient-to-r from-blue-600 to-indigo-500 px-3 py-2 text-xs font-bold text-white shadow hover:from-blue-500 hover:to-indigo-400 active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
                                   >
                                     {isSettlingMap[pool.publicKey.toBase58()] ? '⏳' : '🤝 Settle'}
                                   </button>
                                 </div>
+                                {isFarming && amountWithdrawn < totalFunded && (
+                                  <p className="text-[10px] text-yellow-500/80 italic mt-0.5">
+                                    ⚠️ Settlement is locked until all capital has been drawn down.
+                                  </p>
+                                )}
                                 <button
                                   onClick={() => handleTriggerDefault(pool.publicKey)}
                                   disabled={!!isDefaultingMap[pool.publicKey.toBase58()]}

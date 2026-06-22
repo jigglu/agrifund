@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import { PublicKey } from '@solana/web3.js';
+import { BN } from '@coral-xyz/anchor';
 import { useAgriFund, type OnChainPool } from '@/hooks/useAgriFund';
 import { getAssociatedTokenAddress } from '@solana/spl-token';
 
@@ -148,6 +149,14 @@ export default function InvestorPage() {
   const [txLogs, setTxLogs]             = useState<TxLog[]>([]);
   const [activeFilter, setActiveFilter] = useState<Filter>('All');
   const [successToast, setSuccessToast] = useState<string | null>(null);
+  const [activeTab, setActiveTab]       = useState<'deposit' | 'refund'>('deposit');
+  const [refundAmount, setRefundAmount] = useState('');
+
+  useEffect(() => {
+    if (receiptBalance === 0) {
+      setActiveTab('deposit');
+    }
+  }, [receiptBalance]);
   
   useEffect(() => {
     if (successToast) {
@@ -200,6 +209,25 @@ export default function InvestorPage() {
       setReceiptBalance(0);
     }
   }, [connection, publicKey, livePools, selectedIdx]);
+
+  // A helper to refresh multiple times to ensure RPC consistency
+  const refreshWithRetry = useCallback(async () => {
+    // Refresh immediately
+    await refreshMarketplace();
+    await fetchReceiptBalance();
+    
+    // Refresh again after 1s
+    setTimeout(async () => {
+      await refreshMarketplace();
+      await fetchReceiptBalance();
+    }, 1000);
+
+    // Refresh again after 2.5s
+    setTimeout(async () => {
+      await refreshMarketplace();
+      await fetchReceiptBalance();
+    }, 2500);
+  }, [refreshMarketplace, fetchReceiptBalance]);
 
   // Fetch on mount/wallet ready
   useEffect(() => {
@@ -323,15 +351,29 @@ export default function InvestorPage() {
       
       setInvestAmount('');
 
-      // Close the transaction loop: re-fetch on-chain state immediately
-      await refreshMarketplace();
-      await fetchReceiptBalance();
+      // Optimistically update local states immediately upon success
+      setLivePools(prev => prev.map(pool => {
+        if (pool.publicKey.toBase58() === selectedPoolKey) {
+          return {
+            ...pool,
+            account: {
+              ...pool.account,
+              totalFundedUsdc: pool.account.totalFundedUsdc.add(new BN(amountUsdc))
+            }
+          };
+        }
+        return pool;
+      }));
+      setReceiptBalance(prev => prev + amountFloat);
+
+      // Close the transaction loop: re-fetch on-chain state immediately with retries
+      await refreshWithRetry();
     } catch (e: unknown) {
       updateLog(logId, { status: 'error', error: e instanceof Error ? e.message : String(e) });
     } finally {
       setIsFunding(false);
     }
-  }, [isReady, investAmount, selectedPoolKey, livePools, selectedItem, fundYield, addLog, updateLog, refreshMarketplace, fetchReceiptBalance]);
+  }, [isReady, investAmount, selectedPoolKey, livePools, selectedItem, fundYield, addLog, updateLog, refreshWithRetry]);
 
   const handleClaim = useCallback(async () => {
     if (!isReady || !selectedPoolKey) return;
@@ -357,17 +399,20 @@ export default function InvestorPage() {
       const { txSig } = await claimYield(poolPublicKey);
       updateLog(logId, { status: 'success', sig: txSig });
       setSuccessToast(`Transaction Successful! You successfully claimed your USDC yield share in your wallet.`);
-      await refreshMarketplace();
-      await fetchReceiptBalance();
+      
+      // Optimistically update local states immediately upon success
+      setReceiptBalance(0);
+
+      await refreshWithRetry();
     } catch (e: unknown) {
       updateLog(logId, { status: 'error', error: e instanceof Error ? e.message : String(e) });
     } finally {
       setIsClaiming(false);
     }
-  }, [isReady, selectedPoolKey, livePools, claimYield, addLog, updateLog, refreshMarketplace, fetchReceiptBalance]);
+  }, [isReady, selectedPoolKey, livePools, claimYield, addLog, updateLog, refreshWithRetry]);
 
   const handleRefund = useCallback(async () => {
-    if (!isReady || !selectedPoolKey || receiptBalance <= 0) return;
+    if (!isReady || !selectedPoolKey || !refundAmount) return;
 
     let poolPublicKey: PublicKey;
     try {
@@ -378,13 +423,26 @@ export default function InvestorPage() {
       return;
     }
 
+    const amountFloat = parseFloat(refundAmount);
+    if (isNaN(amountFloat) || amountFloat <= 0) {
+      addLog({ status: 'error', label: 'Invalid refund amount', timestamp: new Date(),
+        error: 'Amount must be greater than zero.' });
+      return;
+    }
+
+    if (amountFloat > receiptBalance) {
+      addLog({ status: 'error', label: 'Refund exceeds balance', timestamp: new Date(),
+        error: `Maximum refundable amount is $${receiptBalance.toFixed(2)}.` });
+      return;
+    }
+
     setIsRefunding(true);
-    const amountUsdc = Math.round(receiptBalance * 1_000_000);
+    const amountUsdc = Math.round(amountFloat * 1_000_000);
 
     const matchedPool = livePools.find(p => p.publicKey.toBase58() === selectedPoolKey);
     const logId = addLog({
       status: 'pending',
-      label: `Refund ${matchedPool?.account.cropName || 'Pool'} — $${receiptBalance.toFixed(2)}`,
+      label: `Refund ${matchedPool?.account.cropName || 'Pool'} — $${amountFloat.toFixed(2)}`,
       timestamp: new Date(),
     });
 
@@ -392,17 +450,33 @@ export default function InvestorPage() {
       const { txSig } = await refundInvestment(poolPublicKey, amountUsdc);
       updateLog(logId, { status: 'success', sig: txSig });
       
-      const formattedAmount = receiptBalance.toLocaleString(undefined, { minimumFractionDigits: 2 });
+      const formattedAmount = amountFloat.toLocaleString(undefined, { minimumFractionDigits: 2 });
       setSuccessToast(`Refund Successful! You returned ${formattedAmount} Pool Receipt Tokens and received your USDC back.`);
       
-      await refreshMarketplace();
-      await fetchReceiptBalance();
+      setRefundAmount('');
+
+      // Optimistically update local states immediately upon success
+      setLivePools(prev => prev.map(pool => {
+        if (pool.publicKey.toBase58() === selectedPoolKey) {
+          return {
+            ...pool,
+            account: {
+              ...pool.account,
+              totalFundedUsdc: pool.account.totalFundedUsdc.sub(new BN(amountUsdc))
+            }
+          };
+        }
+        return pool;
+      }));
+      setReceiptBalance(prev => prev - amountFloat);
+
+      await refreshWithRetry();
     } catch (e: unknown) {
       updateLog(logId, { status: 'error', error: e instanceof Error ? e.message : String(e) });
     } finally {
       setIsRefunding(false);
     }
-  }, [isReady, selectedPoolKey, receiptBalance, livePools, refundInvestment, addLog, updateLog, refreshMarketplace, fetchReceiptBalance]);
+  }, [isReady, selectedPoolKey, refundAmount, receiptBalance, livePools, refundInvestment, addLog, updateLog, refreshWithRetry]);
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -679,102 +753,168 @@ export default function InvestorPage() {
                 meta={selectedItem.meta}
               />
 
-              {/* Amount */}
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs text-slate-500">Amount (USDC)</label>
-                  {selectedItem.livePool && (() => {
-                    const goalMicro   = selectedItem.livePool.account.totalYieldKg.toNumber() *
-                                        selectedItem.livePool.account.pricePerKg.toNumber();
-                    const fundedMicro = selectedItem.livePool.account.totalFundedUsdc.toNumber();
-                    const maxUsd      = Math.max((goalMicro - fundedMicro) / 1_000_000, 0);
-                    return (
-                      <span className="text-[10px] text-slate-500">
-                        max&nbsp;<span className="font-semibold text-teal-400">
-                          ${maxUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                        </span>&nbsp;remaining
-                      </span>
-                    );
-                  })()}
-                </div>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
-                  <input
-                    id="invest-amount"
-                    type="number"
-                    min={0.01}
-                    step={0.01}
-                    disabled={!isPoolOpen}
-                    max={selectedItem.livePool
-                      ? Math.max(
-                          (selectedItem.livePool.account.totalYieldKg.toNumber() *
-                           selectedItem.livePool.account.pricePerKg.toNumber() -
-                           selectedItem.livePool.account.totalFundedUsdc.toNumber()) / 1_000_000,
-                           0
-                        )
-                      : undefined
-                    }
-                    value={investAmount}
-                    onChange={e => setInvestAmount(e.target.value)}
-                    placeholder={isPoolOpen ? "0.00" : "N/A - Closed"}
-                    className="w-full rounded-xl border border-slate-700 bg-slate-800 py-2.5 pl-7 pr-4 text-sm text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
-                  />
-                </div>
-              </div>
-
-              {/* Presets */}
-              {selectedItem.livePool?.account.status.open !== undefined && (
-                <div className="grid grid-cols-4 gap-2">
-                  {PRESET_AMOUNTS.map(amt => (
-                    <button key={amt} id={`preset-${amt}`}
-                      onClick={() => setInvestAmount(String(amt))}
-                      disabled={!isPoolOpen}
-                      className="rounded-lg border border-slate-700 bg-slate-800/60 py-1.5 text-xs font-medium text-slate-400 transition-all hover:border-emerald-500/40 hover:text-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed">
-                      ${amt >= 1_000 ? `${amt / 1_000}k` : amt}
-                    </button>
-                  ))}
+              {/* Tab Switcher */}
+              {isPoolOpen && receiptBalance > 0 && (
+                <div className="flex gap-2 p-1 rounded-xl bg-slate-900/60 border border-slate-700/50">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('deposit')}
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-semibold transition-all ${
+                      activeTab === 'deposit'
+                        ? 'bg-emerald-600/90 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+                    }`}
+                  >
+                    ⚡ Deposit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('refund')}
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-semibold transition-all ${
+                      activeTab === 'refund'
+                        ? 'bg-red-600/90 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+                    }`}
+                  >
+                    ↩️ Withdraw
+                  </button>
                 </div>
               )}
+
+              {activeTab === 'deposit' || !isPoolOpen || receiptBalance === 0 ? (
+                <>
+                  {/* Amount */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-xs text-slate-500">Amount (USDC)</label>
+                      {selectedItem.livePool && (() => {
+                        const goalMicro   = selectedItem.livePool.account.totalYieldKg.toNumber() *
+                                            selectedItem.livePool.account.pricePerKg.toNumber();
+                        const fundedMicro = selectedItem.livePool.account.totalFundedUsdc.toNumber();
+                        const maxUsd      = Math.max((goalMicro - fundedMicro) / 1_000_000, 0);
+                        return (
+                          <span className="text-[10px] text-slate-500">
+                            max&nbsp;<span className="font-semibold text-teal-400">
+                              ${maxUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                            </span>&nbsp;remaining
+                          </span>
+                        );
+                      })()}
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
+                      <input
+                        id="invest-amount"
+                        type="number"
+                        min={0.01}
+                        step={0.01}
+                        disabled={!isPoolOpen}
+                        max={selectedItem.livePool
+                          ? Math.max(
+                              (selectedItem.livePool.account.totalYieldKg.toNumber() *
+                               selectedItem.livePool.account.pricePerKg.toNumber() -
+                               selectedItem.livePool.account.totalFundedUsdc.toNumber()) / 1_000_000,
+                               0
+                            )
+                          : undefined
+                        }
+                        value={investAmount}
+                        onChange={e => setInvestAmount(e.target.value)}
+                        placeholder={isPoolOpen ? "0.00" : "N/A - Closed"}
+                        className="w-full rounded-xl border border-slate-700 bg-slate-800 py-2.5 pl-7 pr-4 text-sm text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Presets */}
+                  {selectedItem.livePool?.account.status.open !== undefined && (
+                    <div className="grid grid-cols-4 gap-2">
+                      {PRESET_AMOUNTS.map(amt => (
+                        <button key={amt} id={`preset-${amt}`}
+                          onClick={() => setInvestAmount(String(amt))}
+                          disabled={!isPoolOpen}
+                          className="rounded-lg border border-slate-700 bg-slate-800/60 py-1.5 text-xs font-medium text-slate-400 transition-all hover:border-emerald-500/40 hover:text-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed">
+                          ${amt >= 1_000 ? `${amt / 1_000}k` : amt}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Submit */}
+                  {isClaimable && isDefaulted && (
+                    <div className="relative w-full mt-4 mb-4 p-3 rounded-xl border border-red-500/30 bg-red-500/10 text-xs text-red-400 font-semibold flex items-center gap-2">
+                      <span>⚠️</span>
+                      <span>POOL DEFAULTED: Parametric Insurance Claim Unlocked</span>
+                    </div>
+                  )}
+                  {isClaimable ? (
+                    <button
+                      id="claim-yield-submit"
+                      onClick={handleClaim}
+                      disabled={!isReady || isClaiming || !selectedPoolKey}
+                      className="mt-5 w-full rounded-xl bg-gradient-to-r from-teal-600 to-emerald-500 py-3.5 text-sm font-bold text-white shadow-lg shadow-teal-900/40 transition-all hover:from-teal-500 hover:to-emerald-400 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed">
+                      {isClaiming ? '⏳ Claiming Yield…' : '🎁 Claim Yield USDC'}
+                    </button>
+                  ) : (
+                    <button
+                      id="fund-submit"
+                      onClick={handleFund}
+                      disabled={!isReady || isFunding || !selectedPoolKey || (connected && (!isPoolOpen || !investAmount))}
+                      className="mt-5 w-full rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 py-3.5 text-sm font-bold text-white shadow-lg shadow-emerald-900/40 transition-all hover:from-emerald-500 hover:to-teal-400 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed">
+                      {isFunding         ? '⏳ Sending Transaction…'
+                        : !connected    ? '🔌 Connect Wallet to Invest'
+                        : !selectedPoolKey ? '⏳ Loading pool address…'
+                        : !isPoolOpen      ? 'Closed - Farming in Progress'
+                        : '⚡ Fund Pool'}
+                    </button>
+                  )}
+                </>
+              ) : (
+                <>
+                  {/* Refund Amount */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-xs text-slate-500">Withdraw Amount (USDC)</label>
+                      <span className="text-[10px] text-slate-500">
+                        Max withdrawable:&nbsp;
+                        <span className="font-semibold text-rose-400">
+                          ${receiptBalance.toFixed(2)}
+                        </span>
+                      </span>
+                    </div>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
+                      <input
+                        id="refund-amount-input"
+                        type="number"
+                        min={0.01}
+                        step={0.01}
+                        max={receiptBalance}
+                        value={refundAmount}
+                        onChange={e => setRefundAmount(e.target.value)}
+                        placeholder="0.00"
+                        className="w-full rounded-xl border border-slate-700 bg-slate-800 py-2.5 pl-7 pr-16 text-sm text-white placeholder-slate-600 focus:border-red-500 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setRefundAmount(String(receiptBalance))}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg bg-red-500/10 border border-red-500/30 px-2 py-1 text-[10px] font-bold text-red-400 hover:bg-red-500/20 transition-all"
+                      >
+                        MAX
+                      </button>
+                    </div>
+                  </div>
+
+                  <button
+                    id="refund-submit"
+                    onClick={handleRefund}
+                    disabled={!isReady || isRefunding || !selectedPoolKey || !refundAmount || parseFloat(refundAmount) <= 0 || parseFloat(refundAmount) > receiptBalance}
+                    className="mt-5 w-full rounded-xl bg-gradient-to-r from-red-600 to-rose-500 py-3.5 text-sm font-bold text-white shadow-lg shadow-red-900/40 transition-all hover:from-red-500 hover:to-rose-400 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed">
+                    {isRefunding ? '⏳ Withdrawing…' : 'Withdraw'}
+                  </button>
+                </>
+              )}
             </div>
-
-            {/* Submit */}
-            {isClaimable && isDefaulted && (
-              <div className="relative w-full mt-4 mb-4 p-3 rounded-xl border border-red-500/30 bg-red-500/10 text-xs text-red-400 font-semibold flex items-center gap-2">
-                <span>⚠️</span>
-                <span>POOL DEFAULTED: Parametric Insurance Claim Unlocked</span>
-              </div>
-            )}
-            {isClaimable ? (
-              <button
-                id="claim-yield-submit"
-                onClick={handleClaim}
-                disabled={!isReady || isClaiming || !selectedPoolKey}
-                className="mt-5 w-full rounded-xl bg-gradient-to-r from-teal-600 to-emerald-500 py-3.5 text-sm font-bold text-white shadow-lg shadow-teal-900/40 transition-all hover:from-teal-500 hover:to-emerald-400 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed">
-                {isClaiming ? '⏳ Claiming Yield…' : '🎁 Claim Yield USDC'}
-              </button>
-            ) : (
-              <button
-                id="fund-submit"
-                onClick={handleFund}
-                disabled={!isReady || isFunding || !selectedPoolKey || (connected && (!isPoolOpen || !investAmount))}
-                className="mt-5 w-full rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 py-3.5 text-sm font-bold text-white shadow-lg shadow-emerald-900/40 transition-all hover:from-emerald-500 hover:to-teal-400 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed">
-                {isFunding         ? '⏳ Sending Transaction…'
-                  : !connected    ? '🔌 Connect Wallet to Invest'
-                  : !selectedPoolKey ? '⏳ Loading pool address…'
-                  : !isPoolOpen      ? 'Closed - Farming in Progress'
-                  : '⚡ Fund Pool on Devnet'}
-              </button>
-            )}
-
-            {isPoolOpen && receiptBalance > 0 && (
-              <button
-                id="refund-submit"
-                onClick={handleRefund}
-                disabled={!isReady || isRefunding || !selectedPoolKey}
-                className="mt-3 w-full rounded-xl bg-gradient-to-r from-red-600 to-rose-500 py-3.5 text-sm font-bold text-white shadow-lg shadow-red-900/40 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed">
-                {isRefunding ? '⏳ Refunding Investment…' : `↩️ Refund Investment ($${receiptBalance.toFixed(2)})`}
-              </button>
-            )}
 
             <p className="mt-3 text-center text-xs text-slate-600">
               Transactions settle on Solana Devnet · ~400ms finality

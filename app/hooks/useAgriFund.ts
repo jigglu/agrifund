@@ -15,6 +15,7 @@ import IDL from '@/lib/agrifund.json';
 
 // Our custom devnet SPL token used to simulate USDC
 export const AGRIUSD_MINT = new PublicKey('G7q4wCAJ422kER19HKbDJ23vSJ3nzcJ1FnZG3yGgwnnL');
+export const TOKEN_METADATA_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
 
 // ── Type helpers derived from the IDL ─────────────────────────────────────
 
@@ -94,6 +95,14 @@ export function useAgriFund() {
         [Buffer.from('receipt_mint'), poolKeypair.publicKey.toBuffer()],
         program.programId
       );
+      const [metadataPda] = PublicKey.findProgramAddressSync(
+        [
+          Buffer.from('metadata'),
+          TOKEN_METADATA_PROGRAM_ID.toBuffer(),
+          receiptMintPda.toBuffer(),
+        ],
+        TOKEN_METADATA_PROGRAM_ID
+      );
 
       const txSig = await (program.methods as any)
         .initializePool(estateName, cropName, category, new BN(yieldKg), new BN(priceUsdc))
@@ -102,6 +111,8 @@ export function useAgriFund() {
           poolTokenVault: vaultPda,
           receiptMint: receiptMintPda,
           tokenMint: AGRIUSD_MINT,
+          metadata: metadataPda,
+          tokenMetadataProgram: TOKEN_METADATA_PROGRAM_ID,
           authority: wallet.publicKey,
           systemProgram: SystemProgram.programId,
           tokenProgram: TOKEN_PROGRAM_ID,
