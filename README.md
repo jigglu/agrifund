@@ -113,19 +113,6 @@ To interact with AgriFund on Devnet without real funds:
 
 ---
 
-## 🗺️ Roadmap
-
-| Phase | Feature | Status |
-|-------|---------|--------|
-| V1 | Core protocol: PDA vaults, receipt token minting, vesting drawdown, parametric default | ✅ Live on Devnet |
-| V1.1 | Dynamic on-chain SPL token metadata (Metaplex) for per-pool receipt tokens | ✅ Complete |
-| V1.2 | Partial withdrawal support before pool locks | ✅ Complete |
-| V2 | Chainlink Weather Oracle integration for automated default triggers | 🔜 Planned |
-| V3 | Multisig agronomist guardrails for large capital tranches | 🔜 Planned |
-| V4 | Mainnet deployment & real USDC integration | 🔜 Planned |
-
----
-
 ## 🤝 Contributing
 
 AgriFund is fully open-source. Contributions, audits, and feedback are welcome.
