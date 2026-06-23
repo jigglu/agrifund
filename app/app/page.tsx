@@ -74,8 +74,8 @@ export default function LandingPage() {
             <Link href="/dashboard/investor" className="text-sm text-slate-400 hover:text-white transition-colors">
               Investors
             </Link>
-            <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="text-sm text-slate-400 hover:text-white transition-colors">
-              Docs
+            <a href="https://github.com/jigglu/agrifund" target="_blank" rel="noopener noreferrer" className="text-sm text-slate-400 hover:text-white transition-colors">
+              GitHub
             </a>
           </div>
           <Link
@@ -123,10 +123,12 @@ export default function LandingPage() {
             </svg>
           </Link>
           <a
-            href="https://github.com"
+            href="https://github.com/jigglu/agrifund"
+            target="_blank"
+            rel="noopener noreferrer"
             className="rounded-2xl border border-slate-700 bg-slate-800/50 px-8 py-4 text-base font-semibold text-slate-300 backdrop-blur transition-all hover:border-slate-500 hover:bg-slate-800 hover:text-white"
           >
-            View Protocol →
+            View on GitHub →
           </a>
         </div>
 
@@ -255,8 +257,8 @@ export default function LandingPage() {
             <span>AgriFund Protocol © 2025 · Built on Solana</span>
           </div>
           <div className="flex gap-6">
-            <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="hover:text-slate-400 transition-colors">Docs</a>
-            <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="hover:text-slate-400 transition-colors">GitHub</a>
+            <a href="https://github.com/jigglu/agrifund" target="_blank" rel="noopener noreferrer" className="hover:text-slate-400 transition-colors">Docs</a>
+            <a href="https://github.com/jigglu/agrifund" target="_blank" rel="noopener noreferrer" className="hover:text-slate-400 transition-colors">GitHub</a>
             <a href="https://discord.com" target="_blank" rel="noopener noreferrer" className="hover:text-slate-400 transition-colors">Discord</a>
             <a href="#" className="hover:text-slate-400 transition-colors">Privacy</a>
             <a href="#" className="hover:text-slate-400 transition-colors">Terms</a>

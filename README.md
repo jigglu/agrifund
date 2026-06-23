@@ -5,8 +5,52 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Network: Devnet](https://img.shields.io/badge/Network-Solana%20Devnet-9945FF)](https://explorer.solana.com/address/3AKoohaxhVPTUNuQAdXPFHf3wAQ5JngY5FnksSuptrp5?cluster=devnet)
 [![Anchor](https://img.shields.io/badge/Built%20With-Anchor%20v0.29-blue)](https://www.anchor-lang.com/)
+[![Live on Vercel](https://img.shields.io/badge/Live%20Demo-agrifund--rwa.vercel.app-black?logo=vercel)](https://agrifund-rwa.vercel.app)
 
-AgriFund is a decentralized, institutional-grade Real-World Asset (RWA) agricultural lending protocol built on Solana. It seamlessly bridges global Web3 liquidity with real-world farming cooperatives, utilizing Program Derived Address (PDA) escrow vaults, 1:1 composable SPL receipt tokens (e.g. `agriGrain`, `agriOil`), linear time-locked capital drawdown guardrails, and mock parametric insurance oracle overrides.
+**🌐 Live App:** [agrifund-rwa.vercel.app](https://agrifund-rwa.vercel.app) · **🔍 On-Chain:** [View on Solana Explorer →](https://explorer.solana.com/address/3AKoohaxhVPTUNuQAdXPFHf3wAQ5JngY5FnksSuptrp5?cluster=devnet)
+
+---
+
+## 🌱 The Problem
+
+**For Indian farmers:** Agricultural credit in India is gatekept by geography and bureaucracy. Rural cooperatives — the backbone of India's food supply — pay predatory interest rates of 18–36% APR to informal lenders, simply because they lack access to borderless, institutional-grade capital.
+
+**For DeFi investors:** Most on-chain yield is circular and speculative. There is no credible on-ramp to stable, real-world returns that create tangible, verifiable impact — especially in high-growth emerging markets.
+
+**The trust gap:** You cannot put a physical farm on a blockchain. How do global investors fund a cooperative without counterparty risk and the threat of a rug-pull?
+
+---
+
+## 💡 The Solution
+
+AgriFund is a decentralized, institutional-grade **Real-World Asset (RWA) agricultural lending protocol** built on Solana. It solves the trust gap through three cryptographic primitives:
+
+1. **PDA Escrow Vaults** — Capital is held in mathematically verifiable Program Derived Address vaults, not centralized multi-sigs. No single party can access funds unilaterally.
+2. **Composable Receipt Tokens** — Every 1 USDC deposited mints exactly 1 pool-specific SPL receipt token to the investor. This token is a cryptographic, transferable claim on the vault — burn it to reclaim your capital + yield.
+3. **Linear Vesting Drawdown** — Farmers cannot withdraw capital upfront. Funds unlock linearly over a configurable farming season, enforced entirely on-chain via Solana's `Clock` sysvar.
+
+---
+
+## ⚡ Why Solana
+
+| Requirement | Why Solana Wins |
+|---|---|
+| **Settlement speed** | ~400ms finality — essential for real-time yield distribution |
+| **Transaction cost** | Sub-cent fees make micro-investment positions economically viable |
+| **SPL Tokens** | Native composable token standard enables per-pool receipt tokens without external infrastructure |
+| **Anchor Framework** | Rust-based safety constraints and IDL generation for trustless, auditable contracts |
+| **Ecosystem depth** | Access to Chainlink oracles, Metaplex metadata, Circle USDC — all first-class on Solana |
+
+---
+
+## ✅ Traction
+
+- **100% feature-complete MVP** live on Solana Devnet
+- **7 core instructions** deployed and verified on-chain at `3AKoohaxhVPTUNuQAdXPFHf3wAQ5JngY5FnksSuptrp5`
+- **Full frontend** live at [agrifund-rwa.vercel.app](https://agrifund-rwa.vercel.app) — Estate Portal, Investor Dashboard, real-time pool state machine
+- **Complete test suite** — `anchor test` covers the full protocol lifecycle (init → fund → farm → settle → claim)
+- **Metaplex token metadata** — each pool mints a uniquely named, symbolized SPL receipt token (e.g., `agriGRAIN`, `agriOIL`)
+- **Partial refund support** — investors can burn receipts and reclaim USDC at any point before farming starts
 
 ---
 
@@ -14,10 +58,11 @@ AgriFund is a decentralized, institutional-grade Real-World Asset (RWA) agricult
 
 AgriFund governs the entire lifecycle of an agricultural loan through a strict, on-chain state machine bound to individual `YieldPool` accounts:
 
-      [ INITIALIZE ] 
+```
+      [ INITIALIZE ]
             │
             ▼
-        ┌───────┐         Early Refund (Burn Receipts -> Reclaim USDC)
+        ┌───────┐         Early Refund (Burn Receipts → Reclaim USDC)
         │ Open  │ ◄───────────────────────────────────────────────────────┐
         └───┬───┘                                                         │
             │ (100% Funded Goal Achieved)                                 │
@@ -37,28 +82,32 @@ AgriFund governs the entire lifecycle of an agricultural loan through a strict, 
         ┌─────────┐                                                       │
         │ Settled │ ──────────────────────────────────────────────────────┘
         └─────────┘   [ Investors Burn Receipts to Claim Principal + Yield ]
+```
 
 ---
 
 ## 🔒 Security & Tokenomic Guardrails
 
 * **Anti-Rug Vesting:** Capital is never handed over to a farmer upfront. Once a pool transitions to `Farming`, funds are drawn down linearly using Solana's on-chain `Clock` sysvar, restricting access to verified tranches.
-* **1:1 Asset Composability:** When investors fund a pool, the protocol mints an exact 1:1 proportional SPL token (e.g., `agriTOKEN`) directly to their wallet via a PDA mint authority. This token serves as a cryptographic claim ticket.
-* **Early-Stage Liquidity (Refunds):** If a pool is still in the `Open` funding phase, investors retain complete sovereignty over their capital. They can trigger an early refund, which safely burns their receipt tokens and returns their USDC from the vault.
-* **Parametric Insurance Simulation:** To handle physical-world agricultural risks, an administrative mock oracle can transition the pool into a `Defaulted` state. This freezes the farmer's vesting access instantly and unlocks immediate residual asset reclamation for investors.
+* **1:1 Asset Composability:** When investors fund a pool, the protocol mints an exact 1:1 proportional SPL token (e.g., `agriGRAIN`) directly to their wallet via a PDA mint authority seeded to that specific yield pool. This token serves as a cryptographic claim ticket.
+* **Early-Stage Liquidity (Refunds):** If a pool is still in the `Open` funding phase, investors retain complete sovereignty over their capital — burn receipt tokens to return exact USDC from the vault.
+* **Parametric Insurance Simulation:** An administrative oracle can transition the pool into a `Defaulted` state, instantly freezing the farmer's vesting access and unlocking immediate residual asset reclamation for investors.
 
 ---
 
 ## 🛠️ Smart Contract Layout (`programs/agrifund/src/lib.rs`)
 
 The core Solana program exposes seven primary instructional endpoints:
-1.  `initialize_pool`: Establishes the target capital goal, initializes the unique PDA token vault, and derives the localized receipt token mint PDA.
-2.  `fund_yield`: Deposits investor USDC into the secure PDA vault and mints the exact equivalent amount of receipt tokens to the investor's ATA.
-3.  `refund_investment`: Allows an investor to pull capital out of an `Open` pool, restoring pool capacity and burning the associated receipt tokens.
-4.  `withdraw_capital`: Governs the linear time-locked capital drawdown for the verified farm authority once farming has commenced.
-5.  `settle_pool`: Allows the farm authority to return the principal plus generated crop profits to the vault, changing the status to `Settled`.
-6.  `trigger_default`: Acts as a mock weather oracle, locking the pool and enabling immediate parametric insurance claim pathways.
-7.  `claim_yield`: Allows investors to burn their receipt tokens post-harvest (or post-default) to claim their exact mathematical share of the USDC vault.
+
+| Instruction | Description |
+|---|---|
+| `initialize_pool` | Establishes target capital goal, initializes PDA token vault, derives receipt token mint PDA + Metaplex metadata |
+| `fund_yield` | Deposits investor USDC into the PDA vault; mints exact 1:1 receipt tokens to investor's ATA |
+| `refund_investment` | Allows investor to pull capital from an `Open` pool; burns associated receipt tokens |
+| `withdraw_capital` | Linear time-locked capital drawdown for the verified farm authority once farming commences |
+| `settle_pool` | Farm authority returns principal + crop profits to vault; transitions status to `Settled` |
+| `trigger_default` | Mock weather oracle — locks the pool and enables parametric insurance claim pathways |
+| `claim_yield` | Investors burn receipt tokens post-harvest (or post-default) to claim their proportional USDC share |
 
 ---
 
@@ -95,10 +144,14 @@ npx tsc --noEmit
 npm run dev
 ```
 
+---
+
 ## 🌐 On-Chain Deployment Details
+
 * **Network:** Solana Devnet
 * **Program ID:** `3AKoohaxhVPTUNuQAdXPFHf3wAQ5JngY5FnksSuptrp5`
 * **Explorer Link:** [View on Solana Explorer →](https://explorer.solana.com/address/3AKoohaxhVPTUNuQAdXPFHf3wAQ5JngY5FnksSuptrp5?cluster=devnet)
+* **Live Frontend:** [agrifund-rwa.vercel.app](https://agrifund-rwa.vercel.app)
 
 ---
 
