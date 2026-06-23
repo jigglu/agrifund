@@ -6,10 +6,10 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-agrifund = "9RVR31qnjswGMc4fYHpdNK5xxUsN2oxf5YfUB6ErxP7B"
+agrifund = "3AKoohaxhVPTUNuQAdXPFHf3wAQ5JngY5FnksSuptrp5"
 
 [programs.localnet]
-agrifund = "9RVR31qnjswGMc4fYHpdNK5xxUsN2oxf5YfUB6ErxP7B"
+agrifund = "3AKoohaxhVPTUNuQAdXPFHf3wAQ5JngY5FnksSuptrp5"
 
 [registry]
 url = "https://api.apr.dev"

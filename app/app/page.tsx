@@ -65,11 +65,18 @@ export default function LandingPage() {
             </span>
           </div>
           <div className="hidden md:flex items-center gap-8">
-            {['Protocol', 'Estates', 'Investors', 'Docs'].map(item => (
-              <a key={item} href="#" className="text-sm text-slate-400 hover:text-white transition-colors">
-                {item}
-              </a>
-            ))}
+            <Link href="/" className="text-sm text-slate-400 hover:text-white transition-colors">
+              Protocol
+            </Link>
+            <Link href="/dashboard/estate" className="text-sm text-slate-400 hover:text-white transition-colors">
+              Estates
+            </Link>
+            <Link href="/dashboard/investor" className="text-sm text-slate-400 hover:text-white transition-colors">
+              Investors
+            </Link>
+            <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="text-sm text-slate-400 hover:text-white transition-colors">
+              Docs
+            </a>
           </div>
           <Link
             href="/dashboard"
@@ -248,9 +255,11 @@ export default function LandingPage() {
             <span>AgriFund Protocol © 2025 · Built on Solana</span>
           </div>
           <div className="flex gap-6">
-            {['Docs', 'GitHub', 'Discord', 'Privacy', 'Terms'].map(l => (
-              <a key={l} href="#" className="hover:text-slate-400 transition-colors">{l}</a>
-            ))}
+            <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="hover:text-slate-400 transition-colors">Docs</a>
+            <a href="https://github.com" target="_blank" rel="noopener noreferrer" className="hover:text-slate-400 transition-colors">GitHub</a>
+            <a href="https://discord.com" target="_blank" rel="noopener noreferrer" className="hover:text-slate-400 transition-colors">Discord</a>
+            <a href="#" className="hover:text-slate-400 transition-colors">Privacy</a>
+            <a href="#" className="hover:text-slate-400 transition-colors">Terms</a>
           </div>
         </div>
       </footer>

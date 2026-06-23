@@ -7,15 +7,45 @@ import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import { useWallet } from '@solana/wallet-adapter-react';
 
 const NAV_LINKS = [
-  { href: '/dashboard/estate',   label: 'Estate Portal',   icon: '🏡', desc: 'Manage yield pools' },
-  { href: '/dashboard/investor', label: 'Investor Market', icon: '📊', desc: 'Fund & trade yield'  },
+  { href: '/dashboard/estate',    label: 'Estate Portal',   icon: '🏡', desc: 'Manage yield pools' },
+  { href: '/dashboard/investor',  label: 'Investor Market', icon: '📊', desc: 'Fund & trade yield'  },
+  { href: '/dashboard/portfolio', label: 'My Investments',  icon: '💼', desc: 'View active investments' },
 ];
 
 const DashboardLayout: FC<{ children: ReactNode }> = ({ children }) => {
   const pathname = usePathname();
   const { publicKey, connected } = useWallet();
   const [mounted, setMounted] = useState(false);
+  const [isClaimingFaucet, setIsClaimingFaucet] = useState(false);
+  const [faucetStatus, setFaucetStatus] = useState<string | null>(null);
+
   useEffect(() => setMounted(true), []);
+
+  const handleClaimFaucet = async () => {
+    if (!publicKey) return;
+    setIsClaimingFaucet(true);
+    setFaucetStatus("Requesting...");
+    try {
+      const res = await fetch('/api/faucet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ publicKey: publicKey.toBase58() })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFaucetStatus("Success! +$1000 USDC");
+        setTimeout(() => setFaucetStatus(null), 5000);
+      } else {
+        setFaucetStatus("Failed");
+        setTimeout(() => setFaucetStatus(null), 5000);
+      }
+    } catch (e) {
+      setFaucetStatus("Error");
+      setTimeout(() => setFaucetStatus(null), 5000);
+    } finally {
+      setIsClaimingFaucet(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#050d14] text-white flex flex-col">
@@ -61,6 +91,18 @@ const DashboardLayout: FC<{ children: ReactNode }> = ({ children }) => {
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
             Devnet
           </div>
+
+          {/* Faucet button */}
+          {mounted && connected && publicKey && (
+            <button
+              onClick={handleClaimFaucet}
+              disabled={isClaimingFaucet}
+              className="flex items-center gap-1.5 rounded-full border border-teal-500/30 bg-teal-950/20 px-3 py-1.5 text-xs text-teal-400 hover:bg-teal-950/50 disabled:opacity-50 transition-all font-semibold"
+            >
+              <span>🚰</span>
+              {faucetStatus || (isClaimingFaucet ? "Claiming..." : "USDC Faucet")}
+            </button>
+          )}
 
           {/* Wallet address */}
           {mounted && connected && publicKey && (

@@ -3,7 +3,7 @@ use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer, MintTo, Burn}
 use anchor_spl::metadata::{create_metadata_accounts_v3, CreateMetadataAccountsV3, Metadata};
 use anchor_spl::metadata::mpl_token_metadata::types::DataV2;
 
-declare_id!("9RVR31qnjswGMc4fYHpdNK5xxUsN2oxf5YfUB6ErxP7B");
+declare_id!("3AKoohaxhVPTUNuQAdXPFHf3wAQ5JngY5FnksSuptrp5");
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq)]
 pub enum PoolStatus {
@@ -16,16 +16,24 @@ pub enum PoolStatus {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Account space constant
-//   8   discriminator
-//   32  authority (Pubkey)
-//   36  crop_name (String, 4 chars len + 32 max chars)
-//   1   vault_bump (u8)
-//   8   total_yield_kg (u64)
-//   8   price_per_kg (u64)
-//   8   total_funded_usdc (u64)
-//   1   is_active (bool)
 // ─────────────────────────────────────────────────────────────────────────────
-const YIELD_POOL_SPACE: usize = 250 + 1 + 8 + 8 + 32; // 299 bytes
+const YIELD_POOL_SPACE: usize = 8   // anchor discriminator
+    + 32                            // authority (Pubkey)
+    + 4 + 50                        // estate_name (String, max 50 chars)
+    + 4 + 32                        // crop_name (String, max 32 chars)
+    + 4 + 32                        // category (String, max 32 chars)
+    + 1                             // vault_bump (u8)
+    + 8                             // total_yield_kg (u64)
+    + 8                             // price_per_kg (u64)
+    + 8                             // total_funded_usdc (u64)
+    + 1                             // is_active (bool)
+    + 1                             // status (PoolStatus)
+    + 8                             // farming_start_time (i64)
+    + 8                             // amount_withdrawn (u64)
+    + 32                            // receipt_mint (Pubkey)
+    + 8                             // vesting_duration (i64)
+    + 2                             // apr (u16 basis points)
+    + 4 + 50;                       // region (String, max 50 chars)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Program
@@ -46,8 +54,15 @@ pub mod agrifund {
         category: String,
         total_yield_kg: u64,
         price_per_kg: u64,
+        vesting_duration: i64,
+        apr: u16,
+        region: String,
     ) -> Result<()> {
+        require!(estate_name.len() <= 50, ErrorCode::EstateNameTooLong);
         require!(crop_name.len() <= 32, ErrorCode::CropNameTooLong);
+        require!(category.len() <= 32, ErrorCode::CategoryTooLong);
+        require!(vesting_duration > 0, ErrorCode::InvalidVestingDuration);
+        require!(region.len() <= 50, ErrorCode::RegionTooLong);
 
         let pool = &mut ctx.accounts.yield_pool;
 
@@ -64,6 +79,9 @@ pub mod agrifund {
         pool.farming_start_time = 0;
         pool.amount_withdrawn  = 0;
         pool.receipt_mint      = ctx.accounts.receipt_mint.key();
+        pool.vesting_duration  = vesting_duration;
+        pool.apr               = apr;
+        pool.region            = region;
 
         msg!(
             "YieldPool initialised: authority={}, estate={}, crop={}, category={}, yield_kg={}, price_per_kg={}",
@@ -121,6 +139,19 @@ pub mod agrifund {
         };
 
         create_metadata_accounts_v3(cpi_ctx, data, true, true, None)?;
+
+        emit!(PoolInitialized {
+            pool: pool.key(),
+            authority: pool.authority,
+            estate_name: pool.estate_name.clone(),
+            crop_name: pool.crop_name.clone(),
+            category: pool.category.clone(),
+            total_yield_kg: pool.total_yield_kg,
+            price_per_kg: pool.price_per_kg,
+            vesting_duration: pool.vesting_duration,
+            apr: pool.apr,
+            region: pool.region.clone(),
+        });
 
         Ok(())
     }
@@ -184,6 +215,12 @@ pub mod agrifund {
             funding_goal,
         );
 
+        emit!(YieldFunded {
+            pool: pool.key(),
+            investor: ctx.accounts.funder.key(),
+            amount_usdc: amount_usdc,
+        });
+
         Ok(())
     }
 
@@ -195,10 +232,13 @@ pub mod agrifund {
             .checked_mul(pool.price_per_kg)
             .ok_or(ErrorCode::Overflow)?;
 
+        let mut farming_started = false;
         if pool.status == PoolStatus::Open {
             require!(pool.total_funded_usdc >= funding_goal, ErrorCode::GoalNotMet);
             pool.status = PoolStatus::Farming;
             pool.farming_start_time = ctx.accounts.clock.unix_timestamp;
+            farming_started = true;
+            pool.is_active = false;
         } else if pool.status == PoolStatus::Farming {
             // Already farming
         } else {
@@ -207,7 +247,7 @@ pub mod agrifund {
 
         let current_time = ctx.accounts.clock.unix_timestamp;
         let elapsed = current_time.saturating_sub(pool.farming_start_time);
-        let vesting_duration: i64 = 180;
+        let vesting_duration = pool.vesting_duration;
 
         let vested_percentage = if elapsed <= 0 {
             0.0
@@ -251,6 +291,13 @@ pub mod agrifund {
             pool.total_funded_usdc
         );
 
+        emit!(CapitalWithdrawn {
+            pool: pool.key(),
+            authority: ctx.accounts.authority.key(),
+            amount_usdc: amount,
+            farming_started,
+        });
+
         Ok(())
     }
 
@@ -269,11 +316,17 @@ pub mod agrifund {
         token::transfer(cpi_ctx, repayment_amount)?;
 
         pool.status = PoolStatus::Settled;
+        pool.is_active = false;
 
         msg!(
             "Pool settled successfully. Repaid amount: {}",
             repayment_amount
         );
+
+        emit!(PoolSettled {
+            pool: pool.key(),
+            settlement_amount: repayment_amount,
+        });
 
         Ok(())
     }
@@ -328,6 +381,12 @@ pub mod agrifund {
             payout_amount
         );
 
+        emit!(YieldClaimed {
+            pool: pool.key(),
+            investor: ctx.accounts.investor.key(),
+            amount_usdc: payout_amount,
+        });
+
         Ok(())
     }
 
@@ -337,9 +396,22 @@ pub mod agrifund {
         require!(pool.status == PoolStatus::Farming, ErrorCode::InvalidState);
 
         pool.status = PoolStatus::Defaulted;
+        pool.is_active = false;
 
         msg!("Pool status defaulted by weather oracle simulation.");
 
+        emit!(DefaultTriggered {
+            pool: pool.key(),
+            authority: ctx.accounts.authority.key(),
+        });
+
+        Ok(())
+    }
+
+    pub fn initialize_oracle(ctx: Context<InitializeOracle>) -> Result<()> {
+        let oracle = &mut ctx.accounts.oracle;
+        oracle.authority = ctx.accounts.authority.key();
+        msg!("Oracle initialized with authority: {}", oracle.authority);
         Ok(())
     }
 
@@ -385,6 +457,12 @@ pub mod agrifund {
             ctx.accounts.investor.key()
         );
 
+        emit!(InvestmentRefunded {
+            pool: pool.key(),
+            investor: ctx.accounts.investor.key(),
+            amount_usdc: refund_amount,
+        });
+
         Ok(())
     }
 }
@@ -422,6 +500,12 @@ pub struct YieldPool {
     pub amount_withdrawn: u64,
     /// Specific receipt token mint for this pool
     pub receipt_mint: Pubkey,
+    /// Vesting duration for capital drawdown in seconds
+    pub vesting_duration: i64,
+    /// Estimated APR in basis points (e.g. 1240 = 12.4%)
+    pub apr: u16,
+    /// Geographic region (e.g. "Kano, Nigeria")
+    pub region: String,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -429,7 +513,7 @@ pub struct YieldPool {
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Accounts)]
-#[instruction(estate_name: String, crop_name: String, category: String, total_yield_kg: u64, price_per_kg: u64)]
+#[instruction(estate_name: String, crop_name: String, category: String, total_yield_kg: u64, price_per_kg: u64, vesting_duration: i64, apr: u16, region: String)]
 pub struct InitializePool<'info> {
     /// The new YieldPool account to be created (PDA or keypair).
     #[account(
@@ -627,12 +711,37 @@ pub struct ClaimYield<'info> {
 
 #[derive(Accounts)]
 pub struct TriggerDefault<'info> {
+    #[account(mut)]
+    pub pool: Account<'info, YieldPool>,
+
     #[account(
-        mut,
+        seeds = [b"oracle"],
+        bump,
         has_one = authority,
     )]
-    pub pool: Account<'info, YieldPool>,
+    pub oracle: Account<'info, OracleConfig>,
+
     pub authority: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct InitializeOracle<'info> {
+    #[account(
+        init,
+        payer = authority,
+        space = 8 + 32,
+        seeds = [b"oracle"],
+        bump
+    )]
+    pub oracle: Account<'info, OracleConfig>,
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[account]
+pub struct OracleConfig {
+    pub authority: Pubkey,
 }
 
 #[derive(Accounts)]
@@ -695,6 +804,14 @@ pub enum ErrorCode {
     #[msg("Crop name exceeds 32 characters maximum.")]
     CropNameTooLong,
 
+    /// Returned if estate name string is too long.
+    #[msg("Estate name exceeds 50 characters maximum.")]
+    EstateNameTooLong,
+
+    /// Returned if category string is too long.
+    #[msg("Category exceeds 32 characters maximum.")]
+    CategoryTooLong,
+
     /// Requested amount exceeds the currently vested available capital.
     #[msg("Requested amount exceeds the currently vested available capital.")]
     VestingLocked,
@@ -710,4 +827,71 @@ pub enum ErrorCode {
     /// No receipt token supply found.
     #[msg("No receipt token supply found.")]
     NoReceiptsSupply,
+
+    /// Vesting duration must be greater than zero.
+    #[msg("Vesting duration must be greater than zero.")]
+    InvalidVestingDuration,
+
+    /// Returned if region string is too long.
+    #[msg("Region exceeds 50 characters maximum.")]
+    RegionTooLong,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Events
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[event]
+pub struct PoolInitialized {
+    pub pool: Pubkey,
+    pub authority: Pubkey,
+    pub estate_name: String,
+    pub crop_name: String,
+    pub category: String,
+    pub total_yield_kg: u64,
+    pub price_per_kg: u64,
+    pub vesting_duration: i64,
+    pub apr: u16,
+    pub region: String,
+}
+
+#[event]
+pub struct YieldFunded {
+    pub pool: Pubkey,
+    pub investor: Pubkey,
+    pub amount_usdc: u64,
+}
+
+#[event]
+pub struct CapitalWithdrawn {
+    pub pool: Pubkey,
+    pub authority: Pubkey,
+    pub amount_usdc: u64,
+    pub farming_started: bool,
+}
+
+#[event]
+pub struct PoolSettled {
+    pub pool: Pubkey,
+    pub settlement_amount: u64,
+}
+
+#[event]
+pub struct DefaultTriggered {
+    pub pool: Pubkey,
+    pub authority: Pubkey,
+}
+
+#[event]
+pub struct YieldClaimed {
+    pub pool: Pubkey,
+    pub investor: Pubkey,
+    pub amount_usdc: u64,
+}
+
+#[event]
+pub struct InvestmentRefunded {
+    pub pool: Pubkey,
+    pub investor: Pubkey,
+    pub amount_usdc: u64,
 }

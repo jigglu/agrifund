@@ -1,6 +1,12 @@
-# AgriFund Protocol 🚀
+# AgriFund Protocol 🌾
 
-AgriFund is a decentralized, institutional-grade Real-World Asset (RWA) agricultural lending protocol built on Solana. It seamlessly bridges global Web3 liquidity with real-world farming cooperatives, utilizing Program Derived Address (PDA) escrow vaults, 1:1 composable SPL receipt tokens, linear time-locked capital drawdown guardrails, and mock parametric insurance oracle overrides.
+> **Decentralizing Real-World Agricultural Yields on Solana.**
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Network: Devnet](https://img.shields.io/badge/Network-Solana%20Devnet-9945FF)](https://explorer.solana.com/address/3AKoohaxhVPTUNuQAdXPFHf3wAQ5JngY5FnksSuptrp5?cluster=devnet)
+[![Anchor](https://img.shields.io/badge/Built%20With-Anchor%20v0.29-blue)](https://www.anchor-lang.com/)
+
+AgriFund is a decentralized, institutional-grade Real-World Asset (RWA) agricultural lending protocol built on Solana. It seamlessly bridges global Web3 liquidity with real-world farming cooperatives, utilizing Program Derived Address (PDA) escrow vaults, 1:1 composable SPL receipt tokens (e.g. `agriGrain`, `agriOil`), linear time-locked capital drawdown guardrails, and mock parametric insurance oracle overrides.
 
 ---
 
@@ -67,7 +73,7 @@ The core Solana program exposes seven primary instructional endpoints:
 ### 1. Run Local Ledger Tests
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/agrifund.git
+git clone https://github.com/jigglu/agrifund.git
 cd agrifund
 
 # Run anchor test suite (Spins up local validator, deploys, and verifies instructions)
@@ -91,5 +97,46 @@ npm run dev
 
 ## 🌐 On-Chain Deployment Details
 * **Network:** Solana Devnet
-* **Program ID:** `CpfKbjko2E5QRizDfhionhFW3awEfEvK6CKe1KZwQEiB`
-* **Explorer Link:** [https://explorer.solana.com/address/CpfKbjko2E5QRizDfhionhFW3awEfEvK6CKe1KZwQEiB?cluster=devnet](https://explorer.solana.com/address/CpfKbjko2E5QRizDfhionhFW3awEfEvK6CKe1KZwQEiB?cluster=devnet)
+* **Program ID:** `3AKoohaxhVPTUNuQAdXPFHf3wAQ5JngY5FnksSuptrp5`
+* **Explorer Link:** [View on Solana Explorer →](https://explorer.solana.com/address/3AKoohaxhVPTUNuQAdXPFHf3wAQ5JngY5FnksSuptrp5?cluster=devnet)
+
+---
+
+## 🧪 Testing the Live Protocol
+
+To interact with AgriFund on Devnet without real funds:
+
+1. **Set your wallet to Devnet** in Phantom/Backpack: Settings → Developer Settings → Change Network → Devnet.
+2. **Get free Devnet SOL** for gas: Visit the [Solana Faucet](https://faucet.solana.com/) and airdrop SOL to your wallet.
+3. **Get test USDC**: The app ships with a built-in "Fund Pool" button that mints AgriUSD (the devnet mock USDC) directly into the pool vault for testing the full estate-side flow.
+4. **Run the full lifecycle**: Initialize Pool → Investor Deposits → Farmer Withdraws Capital → Estate Settles → Investor Claims Yield.
+
+---
+
+## 🗺️ Roadmap
+
+| Phase | Feature | Status |
+|-------|---------|--------|
+| V1 | Core protocol: PDA vaults, receipt token minting, vesting drawdown, parametric default | ✅ Live on Devnet |
+| V1.1 | Dynamic on-chain SPL token metadata (Metaplex) for per-pool receipt tokens | ✅ Complete |
+| V1.2 | Partial withdrawal support before pool locks | ✅ Complete |
+| V2 | Chainlink Weather Oracle integration for automated default triggers | 🔜 Planned |
+| V3 | Multisig agronomist guardrails for large capital tranches | 🔜 Planned |
+| V4 | Mainnet deployment & real USDC integration | 🔜 Planned |
+
+---
+
+## 🤝 Contributing
+
+AgriFund is fully open-source. Contributions, audits, and feedback are welcome.
+
+1. Fork the repo
+2. Create a feature branch (`git checkout -b feat/your-feature`)
+3. Commit your changes
+4. Open a Pull Request
+
+---
+
+## 📄 License
+
+MIT — see [LICENSE](LICENSE) for details.

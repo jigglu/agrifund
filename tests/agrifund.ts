@@ -44,6 +44,7 @@ describe("agrifund", () => {
   let poolVaultPda: PublicKey;
   let poolReceiptMintPda: PublicKey;
   let investorReceiptAta: PublicKey;
+  let oraclePda: PublicKey;
 
   before(async () => {
     // 1. Airdrop SOL to investor
@@ -113,6 +114,28 @@ describe("agrifund", () => {
     );
 
     await provider.sendAndConfirm(tx, [estateAuthority]);
+
+    // 4. Derive and initialize Oracle PDA
+    const [derivedOraclePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("oracle")],
+      program.programId
+    );
+    oraclePda = derivedOraclePda;
+
+    const oracleAccount = await connection.getAccountInfo(oraclePda);
+    if (!oracleAccount) {
+      await program.methods
+        .initializeOracle()
+        .accounts({
+          oracle: oraclePda,
+          authority: estateAuthority.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([estateAuthority])
+        .rpc();
+    } else {
+      console.log("Oracle PDA already exists on-chain, skipping initialization.");
+    }
   });
 
   it("Initializes a yield pool successfully", async () => {
@@ -143,8 +166,12 @@ describe("agrifund", () => {
     const totalYieldKg = new anchor.BN(1000); // 1000 kg
     const pricePerKg = new anchor.BN(1_000_000); // $1.00 per kg (in micro-USDC)
 
-    await program.methods
-      .initializePool(estateName, cropName, category, totalYieldKg, pricePerKg)
+    const vestingDuration = new anchor.BN(180); // 180 seconds
+    const apr = 1240; // 12.4%
+    const region = "Punjab, India";
+
+    const txSig = await program.methods
+      .initializePool(estateName, cropName, category, totalYieldKg, pricePerKg, vestingDuration, apr, region)
       .accounts({
         yieldPool: poolKeypair.publicKey,
         poolTokenVault: poolVaultPda,
@@ -160,6 +187,32 @@ describe("agrifund", () => {
       .signers([poolKeypair, estateAuthority])
       .rpc();
 
+    let txDetails = null;
+    for (let i = 0; i < 10; i++) {
+      txDetails = await connection.getTransaction(txSig, {
+        commitment: "confirmed",
+        maxSupportedTransactionVersion: 0,
+      });
+      if (txDetails) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    const eventParser = new anchor.EventParser(program.programId, program.coder);
+    const events = Array.from(eventParser.parseLogs(txDetails.meta.logMessages));
+    expect(events.length).to.equal(1);
+    const initializedEvent: any = events[0].data;
+
+    expect(initializedEvent.pool.toBase58()).to.equal(poolKeypair.publicKey.toBase58());
+    expect(initializedEvent.authority.toBase58()).to.equal(estateAuthority.publicKey.toBase58());
+    expect(initializedEvent.estateName).to.equal(estateName);
+    expect(initializedEvent.cropName).to.equal(cropName);
+    expect(initializedEvent.category).to.equal(category);
+    expect(initializedEvent.totalYieldKg.toString()).to.equal(totalYieldKg.toString());
+    expect(initializedEvent.pricePerKg.toString()).to.equal(pricePerKg.toString());
+    expect(initializedEvent.vestingDuration.toString()).to.equal(vestingDuration.toString());
+    expect(initializedEvent.apr).to.equal(apr);
+    expect(initializedEvent.region).to.equal(region);
+
     // Fetch account state and assert
     const poolState = await program.account.yieldPool.fetch(poolKeypair.publicKey);
     expect(poolState.estateName).to.equal(estateName);
@@ -170,6 +223,9 @@ describe("agrifund", () => {
     expect(poolState.totalFundedUsdc.toNumber()).to.equal(0);
     expect(poolState.isActive).to.be.true;
     expect(poolState.status).to.have.property("open");
+    expect(poolState.vestingDuration.toNumber()).to.equal(180);
+    expect(poolState.apr).to.equal(apr);
+    expect(poolState.region).to.equal(region);
 
     // Verify Metaplex Metadata account exists
     const metadataAccountInfo = await connection.getAccountInfo(metadataPda);
@@ -192,7 +248,7 @@ describe("agrifund", () => {
 
     const fundAmount = new anchor.BN(400_000_000); // $400.00
 
-    await program.methods
+    const txSig = await program.methods
       .fundYield(fundAmount)
       .accounts({
         yieldPool: poolKeypair.publicKey,
@@ -205,6 +261,25 @@ describe("agrifund", () => {
       })
       .signers([investorKeypair])
       .rpc();
+
+    let txDetails = null;
+    for (let i = 0; i < 10; i++) {
+      txDetails = await connection.getTransaction(txSig, {
+        commitment: "confirmed",
+        maxSupportedTransactionVersion: 0,
+      });
+      if (txDetails) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    const eventParser = new anchor.EventParser(program.programId, program.coder);
+    const events = Array.from(eventParser.parseLogs(txDetails.meta.logMessages));
+    expect(events.length).to.equal(1);
+    const fundedEvent: any = events[0].data;
+
+    expect(fundedEvent.pool.toBase58()).to.equal(poolKeypair.publicKey.toBase58());
+    expect(fundedEvent.investor.toBase58()).to.equal(investorKeypair.publicKey.toBase58());
+    expect(fundedEvent.amountUsdc.toString()).to.equal(fundAmount.toString());
 
     // Assert states
     const poolState = await program.account.yieldPool.fetch(poolKeypair.publicKey);
@@ -292,6 +367,7 @@ describe("agrifund", () => {
     // Verify it is now in Farming status
     const poolStateAfterInit = await program.account.yieldPool.fetch(poolKeypair.publicKey);
     expect(poolStateAfterInit.status).to.have.property("farming");
+    expect(poolStateAfterInit.isActive).to.be.false;
 
     // Call second withdraw with >0 amount immediately after. This should fail with VestingLocked.
     try {
@@ -373,6 +449,7 @@ describe("agrifund", () => {
 
     const poolState = await program.account.yieldPool.fetch(poolKeypair.publicKey);
     expect(poolState.status).to.have.property("settled");
+    expect(poolState.isActive).to.be.false;
   });
 
   it("Claims yield post-settlement and distributes payouts", async () => {
@@ -429,8 +506,12 @@ describe("agrifund", () => {
     const totalYieldKg = new anchor.BN(500); // 500 kg
     const pricePerKg = new anchor.BN(1_000_000); // $1.00 per kg -> $500 total goal
 
+    const vestingDuration = new anchor.BN(180); // 180 seconds
+    const apr = 1500; // 15.0%
+    const region = "Kano, Nigeria";
+
     await program.methods
-      .initializePool(estateName, cropName, category, totalYieldKg, pricePerKg)
+      .initializePool(estateName, cropName, category, totalYieldKg, pricePerKg, vestingDuration, apr, region)
       .accounts({
         yieldPool: secondPoolKeypair.publicKey,
         poolTokenVault: secondVaultPda,
@@ -494,12 +575,16 @@ describe("agrifund", () => {
     // Verify it is farming
     let secondState = await program.account.yieldPool.fetch(secondPoolKeypair.publicKey);
     expect(secondState.status).to.have.property("farming");
+    expect(secondState.isActive).to.be.false;
+    expect(secondState.vestingDuration.toNumber()).to.equal(180);
+    expect(secondState.apr).to.equal(1500);
+    expect(secondState.region).to.equal("Kano, Nigeria");
 
-    // 4. Trigger default (administrative Oracle override)
     await program.methods
       .triggerDefault()
       .accounts({
         pool: secondPoolKeypair.publicKey,
+        oracle: oraclePda,
         authority: estateAuthority.publicKey,
       })
       .signers([estateAuthority])
@@ -507,6 +592,7 @@ describe("agrifund", () => {
 
     secondState = await program.account.yieldPool.fetch(secondPoolKeypair.publicKey);
     expect(secondState.status).to.have.property("defaulted");
+    expect(secondState.isActive).to.be.false;
 
     // 5. Investor claims remaining yield (all $500 USDC since $0 was drawn down)
     const initialInvestorUsdc = (await connection.getTokenAccountBalance(investorUsdcAta)).value.uiAmount || 0;

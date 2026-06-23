@@ -20,12 +20,50 @@ interface TxLog {
 // ── Static catalog metadata (display labels, APR etc.) ────────────────────
 // The on-chain data now stores crop_name. We enrich it with
 // display metadata keyed by cropName.
-const CATALOG = [
-  { farmer: 'Rajesh Kumar Farms',   crop: 'Basmati Rice',   region: 'Punjab, India',  avatar: '🌾', apr: '12.4%', category: 'Grains' },
-  { farmer: 'Amara Nwosu Estate',   crop: 'Sesame Seeds',   region: 'Kano, Nigeria',  avatar: '🌻', apr: '15.8%', category: 'Oils'   },
-  { farmer: 'Mendez Agro Holdings', crop: 'Arabica Coffee', region: 'Oaxaca, Mexico', avatar: '☕', apr: '18.2%', category: 'Coffee' },
-  { farmer: 'Li Wei Tea Gardens',   crop: 'Pu-erh Tea',     region: 'Yunnan, China',  avatar: '🍃', apr: '21.6%', category: 'Coffee' },
-];
+interface PoolMeta {
+  farmer: string;
+  crop: string;
+  region: string;
+  avatar: string;
+  apr: string;
+  category: string;
+}
+
+const getPoolMeta = (pool: OnChainPool | null): PoolMeta => {
+  if (!pool) return {
+    farmer: 'Unknown Farmer',
+    crop: 'Unknown Crop',
+    region: 'Unknown Region',
+    avatar: '🌱',
+    apr: '0.0%',
+    category: 'Other'
+  };
+  const apr = pool.account.apr ? `${(pool.account.apr / 100).toFixed(1)}%` : '0.0%';
+  const category = pool.account.category || 'Other';
+  
+  // Choose avatar based on category or crop name
+  const cropLower = pool.account.cropName?.toLowerCase() || '';
+  const categoryLower = category.toLowerCase();
+  let avatar = '🌱';
+  if (categoryLower.includes('coffee') || cropLower.includes('coffee')) {
+    avatar = '☕';
+  } else if (categoryLower.includes('grain') || cropLower.includes('rice') || cropLower.includes('wheat') || cropLower.includes('grain')) {
+    avatar = '🌾';
+  } else if (categoryLower.includes('oil') || cropLower.includes('sesame') || cropLower.includes('seed')) {
+    avatar = '🌻';
+  } else if (cropLower.includes('tea')) {
+    avatar = '🍃';
+  }
+  
+  return {
+    farmer: pool.account.estateName || `Farm ${pool.account.authority.toBase58().slice(0, 4)}`,
+    crop: pool.account.cropName || 'Unknown Crop',
+    region: pool.account.region || 'Decentralized',
+    avatar,
+    apr,
+    category
+  };
+};
 
 const PRESET_AMOUNTS = [100, 500, 1_000, 5_000];
 const FILTERS        = ['All', 'Grains', 'Coffee', 'Oils'] as const;
@@ -53,7 +91,7 @@ const pct = (funded: number, goal: number) =>
   goal > 0 ? Math.min((funded / goal) * 100, 100) : 0;
 
 // ── Sub-components ─────────────────────────────────────────────────────────
-const AssetRiskProfile = ({ pool, meta }: { pool: OnChainPool; meta: typeof CATALOG[0] }) => {
+const AssetRiskProfile = ({ pool, meta }: { pool: OnChainPool; meta: PoolMeta }) => {
   const yieldKg  = pool.account.totalYieldKg.toNumber();
   return (
     <div className="rounded-xl border border-teal-500/20 bg-teal-900/10 p-4 mt-3">
@@ -131,7 +169,7 @@ const TxBadge = ({ log }: { log: TxLog }) => (
 export default function InvestorPage() {
   const { connection } = useConnection();
   const { connected, publicKey } = useWallet();
-  const { isReady, fundYield, claimYield, refundInvestment, fetchAllPools } = useAgriFund();
+  const { isReady, program, fundYield, claimYield, refundInvestment, fetchAllPools } = useAgriFund();
 
   // ── Live on-chain state ──────────────────────────────────────────────────
   const [livePools, setLivePools]         = useState<OnChainPool[]>([]);
@@ -148,9 +186,17 @@ export default function InvestorPage() {
   const [receiptBalance, setReceiptBalance] = useState<number>(0);
   const [txLogs, setTxLogs]             = useState<TxLog[]>([]);
   const [activeFilter, setActiveFilter] = useState<Filter>('All');
-  const [successToast, setSuccessToast] = useState<string | null>(null);
+  interface ToastConfig {
+    title: string;
+    message: string;
+    icon: string;
+  }
+  const [successToast, setSuccessToast] = useState<ToastConfig | null>(null);
   const [activeTab, setActiveTab]       = useState<'deposit' | 'refund'>('deposit');
   const [refundAmount, setRefundAmount] = useState('');
+
+  const [mounted, setMounted]           = useState(false);
+  useEffect(() => setMounted(true), []);
 
   useEffect(() => {
     if (receiptBalance === 0) {
@@ -165,8 +211,7 @@ export default function InvestorPage() {
     }
   }, [successToast]);
 
-  const [mounted, setMounted]           = useState(false);
-  useEffect(() => setMounted(true), []);
+
 
   // Auto-default selectedPoolKey when live data arrives
   useEffect(() => {
@@ -181,6 +226,21 @@ export default function InvestorPage() {
       setSelectedPoolKey(livePools[selectedIdx].publicKey.toBase58());
     }
   }, [selectedIdx, livePools]);
+
+  // Select active pool based on query parameter (?pool=ADDRESS)
+  useEffect(() => {
+    if (typeof window !== 'undefined' && livePools.length > 0) {
+      const params = new URLSearchParams(window.location.search);
+      const poolParam = params.get('pool');
+      if (poolParam) {
+        const idx = livePools.findIndex(p => p.publicKey.toBase58() === poolParam);
+        if (idx !== -1) {
+          setSelectedIdx(idx);
+          setSelectedPoolKey(poolParam);
+        }
+      }
+    }
+  }, [livePools]);
 
   // ── Marketplace refresh ──────────────────────────────────────────────────
   const refreshMarketplace = useCallback(async () => {
@@ -209,6 +269,8 @@ export default function InvestorPage() {
       setReceiptBalance(0);
     }
   }, [connection, publicKey, livePools, selectedIdx]);
+
+
 
   // A helper to refresh multiple times to ensure RPC consistency
   const refreshWithRetry = useCallback(async () => {
@@ -240,18 +302,41 @@ export default function InvestorPage() {
     fetchReceiptBalance();
   }, [fetchReceiptBalance, livePools, selectedIdx]);
 
+
+
+  useEffect(() => {
+    if (!isReady || !program) return;
+
+    const refresh = () => {
+      refreshMarketplace();
+      fetchReceiptBalance();
+    };
+
+    const listeners = [
+      program.addEventListener('YieldFunded', refresh),
+      program.addEventListener('CapitalWithdrawn', refresh),
+      program.addEventListener('PoolSettled', refresh),
+      program.addEventListener('DefaultTriggered', refresh),
+      program.addEventListener('YieldClaimed', refresh),
+      program.addEventListener('InvestmentRefunded', refresh),
+    ];
+
+    return () => {
+      listeners.forEach(id => {
+        try {
+          program.removeEventListener(id);
+        } catch (e) {
+          // ignore
+        }
+      });
+    };
+  }, [isReady, program, refreshMarketplace, fetchReceiptBalance]);
+
   // ── Derived display data ─────────────────────────────────────────────────
   // Only surface entries that have a confirmed on-chain account.
   // We enrich the live on-chain data with static CATALOG metadata based on cropName.
   const mergedPools = livePools.map(livePool => {
-    const meta = CATALOG.find(c => c.crop === livePool.account.cropName) ?? {
-      farmer: `Farm ${livePool.account.authority.toBase58().slice(0, 4)}`,
-      crop: livePool.account.cropName,
-      region: 'Decentralized',
-      avatar: '🌱',
-      apr: 'TBD',
-      category: 'Other' as const
-    };
+    const meta = getPoolMeta(livePool);
     return { meta, livePool };
   });
 
@@ -262,8 +347,8 @@ export default function InvestorPage() {
   const selectedPool = livePools[selectedIdx];
 
   const selectedItem = mergedPools.find((_, i) => i === selectedIdx) ?? mergedPools[0] ?? {
-    meta: CATALOG[0],
-    livePool: livePools[0] ?? null,
+    meta: getPoolMeta(null),
+    livePool: null,
   };
 
   const isPoolOpen = !selectedItem.livePool || selectedItem.livePool.account.status.open !== undefined;
@@ -347,7 +432,11 @@ export default function InvestorPage() {
       updateLog(logId, { status: 'success', sig: txSig });
       
       const formattedAmount = parseFloat(investAmount).toLocaleString(undefined, { minimumFractionDigits: 2 });
-      setSuccessToast(`Transaction Successful! You received ${formattedAmount} Pool Receipt Tokens in your wallet.`);
+      setSuccessToast({
+        title: 'Receipt Tokens Minted',
+        message: `Transaction Successful! You received ${formattedAmount} Pool Receipt Tokens in your wallet.`,
+        icon: '🎉',
+      });
       
       setInvestAmount('');
 
@@ -398,7 +487,11 @@ export default function InvestorPage() {
     try {
       const { txSig } = await claimYield(poolPublicKey);
       updateLog(logId, { status: 'success', sig: txSig });
-      setSuccessToast(`Transaction Successful! You successfully claimed your USDC yield share in your wallet.`);
+      setSuccessToast({
+        title: 'USDC Yield Claimed',
+        message: `Transaction Successful! You successfully claimed your USDC yield share in your wallet.`,
+        icon: '💰',
+      });
       
       // Optimistically update local states immediately upon success
       setReceiptBalance(0);
@@ -451,7 +544,11 @@ export default function InvestorPage() {
       updateLog(logId, { status: 'success', sig: txSig });
       
       const formattedAmount = amountFloat.toLocaleString(undefined, { minimumFractionDigits: 2 });
-      setSuccessToast(`Refund Successful! You returned ${formattedAmount} Pool Receipt Tokens and received your USDC back.`);
+      setSuccessToast({
+        title: 'Investment Refunded',
+        message: `Refund Successful! You returned ${formattedAmount} Pool Receipt Tokens and received your USDC back.`,
+        icon: '↩️',
+      });
       
       setRefundAmount('');
 
@@ -484,11 +581,11 @@ export default function InvestorPage() {
       {successToast && (
         <div className="fixed bottom-5 right-5 z-55 flex max-w-md items-center gap-3 rounded-2xl border border-emerald-500/30 bg-slate-900/90 p-4 shadow-xl backdrop-blur-md transition-all">
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400 text-lg">
-            🎉
+            {successToast.icon}
           </span>
           <div className="flex-1 min-w-0">
-            <h4 className="text-xs font-bold text-white uppercase tracking-wider">Receipt Tokens Minted</h4>
-            <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">{successToast}</p>
+            <h4 className="text-xs font-bold text-white uppercase tracking-wider">{successToast.title}</h4>
+            <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">{successToast.message}</p>
           </div>
           <button 
             onClick={() => setSuccessToast(null)} 
@@ -535,6 +632,7 @@ export default function InvestorPage() {
       <div className="grid gap-8 lg:grid-cols-5">
         {/* ── Pool listing — 3/5 ──────────────────────────────────────── */}
         <section className="lg:col-span-3">
+
           <div className="mb-5 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <h2 className="font-bold text-white">Open Yield Pools</h2>
@@ -585,7 +683,6 @@ export default function InvestorPage() {
               const goalUsd      = toUsdc(goalMicro);
               const fundedUsd    = toUsdc(fundedMicro);
               const isActive     = livePool?.account.isActive ?? true;
-              const globalIdx    = CATALOG.indexOf(meta);
               const isSelected   = selectedPool?.publicKey.toBase58() === livePool?.publicKey.toBase58();
 
               return (
@@ -605,8 +702,11 @@ export default function InvestorPage() {
                     </span>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between gap-3 mb-1">
-                        <div>
-                          <p className="font-semibold text-white">
+                        <div className="min-w-0 flex-1">
+                          <p
+                            className="font-semibold text-white line-clamp-2 break-words"
+                            title={livePool ? livePool.account.estateName : meta.farmer}
+                          >
                             {livePool ? livePool.account.estateName : meta.farmer}
                           </p>
                           <p className="text-sm text-slate-400">{meta.crop} · {meta.region}</p>
@@ -704,7 +804,7 @@ export default function InvestorPage() {
                     className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm text-white focus:border-emerald-500 focus:outline-none"
                   >
                     {livePools.map((pool, i) => {
-                      const meta = CATALOG.find(c => c.crop === pool.account.cropName) ?? { avatar: '🌱', crop: pool.account.cropName };
+                      const meta = getPoolMeta(pool);
                       const key  = pool.publicKey.toBase58();
                       return (
                         <option key={key} value={key}>

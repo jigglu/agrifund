@@ -6,7 +6,10 @@ import { PublicKey } from '@solana/web3.js';
 import { BN } from '@coral-xyz/anchor';
 import { useAgriFund, OnChainPool } from '@/hooks/useAgriFund';
 
-const AUTHORIZED_ADMINS = ["GosHAi7SeWs3Xv6Ys4aaw68DwHafbGqgZ8KPcVcDUBT2"];
+const adminEnv = process.env.NEXT_PUBLIC_AUTHORIZED_ADMINS || "";
+const AUTHORIZED_ADMINS = adminEnv
+  ? adminEnv.split(",").map(a => a.trim())
+  : ["GosHAi7SeWs3Xv6Ys4aaw68DwHafbGqgZ8KPcVcDUBT2"];
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface TxLog {
@@ -60,7 +63,7 @@ const getStatusLabelAndColor = (status: any) => {
 // ── Page ───────────────────────────────────────────────────────────────────
 export default function EstatePage() {
   const { connected, publicKey } = useWallet();
-  const { isReady, initializePool, withdrawCapital, settlePool, triggerDefault, fetchAllPools } = useAgriFund();
+  const { isReady, program, initializePool, withdrawCapital, settlePool, triggerDefault, fetchAllPools } = useAgriFund();
   
   const isAuthorized = connected && publicKey && AUTHORIZED_ADMINS.includes(publicKey.toBase58());
 
@@ -72,6 +75,9 @@ export default function EstatePage() {
   const [customCategory, setCustomCategory] = useState("Grains");
   const [customYieldKg, setCustomYieldKg] = useState("");
   const [customPrice, setCustomPrice] = useState("");
+  const [customVestingDuration, setCustomVestingDuration] = useState("180");
+  const [customApr, setCustomApr] = useState("");
+  const [customRegion, setCustomRegion] = useState("");
   const [isInitializing, setIsInitializing] = useState(false);
   const [isWithdrawingMap, setIsWithdrawingMap] = useState<Record<string, boolean>>({});
   const [repaymentAmounts, setRepaymentAmounts] = useState<Record<string, string>>({});
@@ -108,6 +114,31 @@ export default function EstatePage() {
     refreshMyPools();
   }, [refreshMyPools]);
 
+  useEffect(() => {
+    if (!isReady || !program) return;
+
+    const refresh = () => {
+      refreshMyPools();
+    };
+
+    const listeners = [
+      program.addEventListener('PoolInitialized', refresh),
+      program.addEventListener('CapitalWithdrawn', refresh),
+      program.addEventListener('PoolSettled', refresh),
+      program.addEventListener('DefaultTriggered', refresh),
+    ];
+
+    return () => {
+      listeners.forEach(id => {
+        try {
+          program.removeEventListener(id);
+        } catch (e) {
+          // ignore
+        }
+      });
+    };
+  }, [isReady, program, refreshMyPools]);
+
   const refreshWithRetry = useCallback(async () => {
     await refreshMyPools();
 
@@ -131,7 +162,7 @@ export default function EstatePage() {
     setTxLogs(prev => prev.map(l => l.id === id ? { ...l, ...patch } : l)), []);
 
   const handleInitializeCustomPool = async () => {
-    if (!isReady || !customEstateName || !customCropName || !customYieldKg || !customPrice) return;
+    if (!isReady || !customEstateName || !customCropName || !customYieldKg || !customPrice || !customVestingDuration || !customApr || !customRegion) return;
     
     setIsInitializing(true);
     const logId = addLog({
@@ -145,13 +176,19 @@ export default function EstatePage() {
       const yieldKg = Number(customYieldKg);
       // Multiply by 1_000_000 for micro-USDC scaling
       const priceUsdc = Math.round(Number(customPrice) * 1_000_000);
+      const vestingDuration = Number(customVestingDuration) || 180;
+      const apr = Math.round(Number(customApr) * 100);
+      const region = customRegion;
 
       const { txSig } = await initializePool(
         customEstateName,
         customCropName,
         customCategory,
         yieldKg,
-        priceUsdc
+        priceUsdc,
+        vestingDuration,
+        apr,
+        region
       );
       
       updateLog(logId, { status: 'success', sig: txSig });
@@ -162,6 +199,9 @@ export default function EstatePage() {
       setCustomCategory("Grains");
       setCustomYieldKg("");
       setCustomPrice("");
+      setCustomVestingDuration("180");
+      setCustomApr("");
+      setCustomRegion("");
 
       // Re-fetch active admin pools with retries
       await refreshWithRetry();
@@ -410,10 +450,45 @@ export default function EstatePage() {
                     />
                   </div>
                 </div>
+
+                <div>
+                  <label className="text-xs text-slate-400 mb-1 block">Vesting Duration (seconds)</label>
+                  <input 
+                    type="number" 
+                    value={customVestingDuration}
+                    onChange={e => setCustomVestingDuration(e.target.value)}
+                    placeholder="e.g., 180"
+                    className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs text-slate-400 mb-1 block">Estimated APR (%)</label>
+                    <input 
+                      type="number" 
+                      step="0.1"
+                      value={customApr}
+                      onChange={e => setCustomApr(e.target.value)}
+                      placeholder="e.g., 12.5"
+                      className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-400 mb-1 block">Region</label>
+                    <input 
+                      type="text" 
+                      value={customRegion}
+                      onChange={e => setCustomRegion(e.target.value)}
+                      placeholder="e.g., Kano, Nigeria"
+                      className="w-full rounded-xl border border-slate-700 bg-slate-800 px-4 py-3 text-sm text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none"
+                    />
+                  </div>
+                </div>
                 
                 <button
                   onClick={handleInitializeCustomPool}
-                  disabled={!isReady || isInitializing || !customEstateName || !customCropName || !customYieldKg || !customPrice}
+                  disabled={!isReady || isInitializing || !customEstateName || !customCropName || !customYieldKg || !customPrice || !customVestingDuration || !customApr || !customRegion}
                   className="mt-6 w-full rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 py-3.5 text-sm font-bold text-white shadow-lg shadow-emerald-900/40 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {isInitializing ? '⏳ Executing Transaction...' : '⚡ Initialize Pool on Devnet'}
@@ -440,7 +515,7 @@ export default function EstatePage() {
                   if (isFarming && farmingStartTime > 0) {
                     elapsed = Math.max(0, now - farmingStartTime);
                   }
-                  const vestingDuration = 180;
+                  const vestingDuration = pool.account.vestingDuration ? pool.account.vestingDuration.toNumber() : 180;
                   const vestedPercentage = isFarming ? Math.min(elapsed / vestingDuration, 1.0) : 0;
                   const totalVested = Math.round(totalFunded * vestedPercentage);
                   const availableToWithdraw = Math.max(0, totalVested - amountWithdrawn);
@@ -464,6 +539,12 @@ export default function EstatePage() {
                         </p>
                         <p className="text-xs text-slate-400 flex justify-between">
                           <span>Price:</span> <span className="text-white">${(pool.account.pricePerKg.toNumber() / 1_000_000).toFixed(2)} / kg</span>
+                        </p>
+                        <p className="text-xs text-slate-400 flex justify-between">
+                          <span>Estimated APR:</span> <span className="text-white">{pool.account.apr ? (pool.account.apr / 100).toFixed(1) : "0.0"}%</span>
+                        </p>
+                        <p className="text-xs text-slate-400 flex justify-between">
+                          <span>Region:</span> <span className="text-white">{pool.account.region || "Unknown"}</span>
                         </p>
                         <p className="text-xs text-slate-400 flex justify-between mt-2 pt-2 border-t border-slate-700/50">
                           <span>Funded:</span> <span className="text-teal-400">${(pool.account.totalFundedUsdc.toNumber() / 1_000_000).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>

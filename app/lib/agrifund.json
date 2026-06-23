@@ -1,5 +1,5 @@
 {
-  "address": "9RVR31qnjswGMc4fYHpdNK5xxUsN2oxf5YfUB6ErxP7B",
+  "address": "3AKoohaxhVPTUNuQAdXPFHf3wAQ5JngY5FnksSuptrp5",
   "metadata": {
     "name": "agrifund",
     "version": "0.1.0",
@@ -184,6 +184,50 @@
       ]
     },
     {
+      "name": "initialize_oracle",
+      "discriminator": [
+        144,
+        223,
+        131,
+        120,
+        196,
+        253,
+        181,
+        99
+      ],
+      "accounts": [
+        {
+          "name": "oracle",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  114,
+                  97,
+                  99,
+                  108,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "initialize_pool",
       "docs": [
         "Initialise a new YieldPool.",
@@ -352,6 +396,18 @@
         {
           "name": "price_per_kg",
           "type": "u64"
+        },
+        {
+          "name": "vesting_duration",
+          "type": "i64"
+        },
+        {
+          "name": "apr",
+          "type": "u16"
+        },
+        {
+          "name": "region",
+          "type": "string"
         }
       ]
     },
@@ -504,10 +560,28 @@
           "writable": true
         },
         {
+          "name": "oracle",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  114,
+                  97,
+                  99,
+                  108,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "authority",
           "signer": true,
           "relations": [
-            "pool"
+            "oracle"
           ]
         }
       ],
@@ -583,6 +657,19 @@
   ],
   "accounts": [
     {
+      "name": "OracleConfig",
+      "discriminator": [
+        133,
+        196,
+        152,
+        50,
+        27,
+        21,
+        145,
+        254
+      ]
+    },
+    {
       "name": "YieldPool",
       "discriminator": [
         118,
@@ -593,6 +680,99 @@
         189,
         27,
         100
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "CapitalWithdrawn",
+      "discriminator": [
+        202,
+        30,
+        139,
+        204,
+        45,
+        210,
+        182,
+        244
+      ]
+    },
+    {
+      "name": "DefaultTriggered",
+      "discriminator": [
+        112,
+        132,
+        187,
+        249,
+        75,
+        27,
+        47,
+        200
+      ]
+    },
+    {
+      "name": "InvestmentRefunded",
+      "discriminator": [
+        171,
+        171,
+        31,
+        120,
+        62,
+        58,
+        194,
+        224
+      ]
+    },
+    {
+      "name": "PoolInitialized",
+      "discriminator": [
+        100,
+        118,
+        173,
+        87,
+        12,
+        198,
+        254,
+        229
+      ]
+    },
+    {
+      "name": "PoolSettled",
+      "discriminator": [
+        71,
+        220,
+        136,
+        147,
+        65,
+        185,
+        90,
+        47
+      ]
+    },
+    {
+      "name": "YieldClaimed",
+      "discriminator": [
+        177,
+        201,
+        94,
+        68,
+        19,
+        200,
+        227,
+        27
+      ]
+    },
+    {
+      "name": "YieldFunded",
+      "discriminator": [
+        6,
+        69,
+        199,
+        236,
+        23,
+        178,
+        100,
+        64
       ]
     }
   ],
@@ -619,26 +799,182 @@
     },
     {
       "code": 6004,
+      "name": "EstateNameTooLong",
+      "msg": "Estate name exceeds 50 characters maximum."
+    },
+    {
+      "code": 6005,
+      "name": "CategoryTooLong",
+      "msg": "Category exceeds 32 characters maximum."
+    },
+    {
+      "code": 6006,
       "name": "VestingLocked",
       "msg": "Requested amount exceeds the currently vested available capital."
     },
     {
-      "code": 6005,
+      "code": 6007,
       "name": "InvalidState",
       "msg": "The pool is not in a withdrawable state."
     },
     {
-      "code": 6006,
+      "code": 6008,
       "name": "GoalNotMet",
       "msg": "The funding goal has not been reached yet."
     },
     {
-      "code": 6007,
+      "code": 6009,
       "name": "NoReceiptsSupply",
       "msg": "No receipt token supply found."
+    },
+    {
+      "code": 6010,
+      "name": "InvalidVestingDuration",
+      "msg": "Vesting duration must be greater than zero."
+    },
+    {
+      "code": 6011,
+      "name": "RegionTooLong",
+      "msg": "Region exceeds 50 characters maximum."
     }
   ],
   "types": [
+    {
+      "name": "CapitalWithdrawn",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount_usdc",
+            "type": "u64"
+          },
+          {
+            "name": "farming_started",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DefaultTriggered",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "InvestmentRefunded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "investor",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount_usdc",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OracleConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PoolInitialized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "estate_name",
+            "type": "string"
+          },
+          {
+            "name": "crop_name",
+            "type": "string"
+          },
+          {
+            "name": "category",
+            "type": "string"
+          },
+          {
+            "name": "total_yield_kg",
+            "type": "u64"
+          },
+          {
+            "name": "price_per_kg",
+            "type": "u64"
+          },
+          {
+            "name": "vesting_duration",
+            "type": "i64"
+          },
+          {
+            "name": "apr",
+            "type": "u16"
+          },
+          {
+            "name": "region",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PoolSettled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "settlement_amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
     {
       "name": "PoolStatus",
       "type": {
@@ -655,6 +991,46 @@
           },
           {
             "name": "Defaulted"
+          }
+        ]
+      }
+    },
+    {
+      "name": "YieldClaimed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "investor",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount_usdc",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "YieldFunded",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "investor",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount_usdc",
+            "type": "u64"
           }
         ]
       }
@@ -761,6 +1137,27 @@
               "Specific receipt token mint for this pool"
             ],
             "type": "pubkey"
+          },
+          {
+            "name": "vesting_duration",
+            "docs": [
+              "Vesting duration for capital drawdown in seconds"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "apr",
+            "docs": [
+              "Estimated APR in basis points (e.g. 1240 = 12.4%)"
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "region",
+            "docs": [
+              "Geographic region (e.g. \"Kano, Nigeria\")"
+            ],
+            "type": "string"
           }
         ]
       }

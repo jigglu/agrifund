@@ -34,6 +34,9 @@ export interface YieldPoolAccount {
   farmingStartTime: BN;
   amountWithdrawn: BN;
   receiptMint: PublicKey;
+  vestingDuration: BN;
+  apr: number;
+  region: string;
 }
 
 /** A single entry returned by program.account.yieldPool.all() */
@@ -81,7 +84,7 @@ export function useAgriFund() {
    * @returns          { txSig, poolAddress } on success
    */
   const initializePool = useCallback(
-    async (estateName: string, cropName: string, category: string, yieldKg: number, priceUsdc: number): Promise<InitPoolResult> => {
+    async (estateName: string, cropName: string, category: string, yieldKg: number, priceUsdc: number, vestingDuration: number, apr: number, region: string): Promise<InitPoolResult> => {
       if (!program || !wallet) {
         throw new Error('Wallet not connected');
       }
@@ -105,7 +108,16 @@ export function useAgriFund() {
       );
 
       const txSig = await (program.methods as any)
-        .initializePool(estateName, cropName, category, new BN(yieldKg), new BN(priceUsdc))
+        .initializePool(
+          estateName,
+          cropName,
+          category,
+          new BN(yieldKg),
+          new BN(priceUsdc),
+          new BN(vestingDuration),
+          apr,
+          region
+        )
         .accounts({
           yieldPool: poolKeypair.publicKey,
           poolTokenVault: vaultPda,
@@ -314,10 +326,16 @@ export function useAgriFund() {
         throw new Error('Wallet not connected');
       }
 
+      const [oraclePda] = PublicKey.findProgramAddressSync(
+        [Buffer.from('oracle')],
+        program.programId
+      );
+
       const txSig = await (program.methods as any)
         .triggerDefault()
         .accounts({
           pool: targetPoolAddress,
+          oracle: oraclePda,
           authority: wallet.publicKey,
         })
         .rpc();

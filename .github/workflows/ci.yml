@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: stable
+        components: clippy, rustfmt
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'yarn'
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Install Solana CLI
+      run: |
+        sh -c "$(curl -sSfL https://release.solana.com/v1.18.17/install)"
+        echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+
+    - name: Install Anchor CLI
+      run: |
+        npm install -g @coral-xyz/anchor-cli@0.31.1 --prefix=$HOME/.local
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: Install Dependencies
+      run: |
+        yarn install --frozen-lockfile
+        cd app && yarn install --frozen-lockfile
+
+    - name: Check code formatting
+      run: |
+        yarn run lint
+
+    - name: Build Anchor Program
+      run: |
+        anchor build
+
+    - name: Run Integration Tests
+      run: |
+        # Generate target/deploy/agrifund-keypair.json if not present
+        mkdir -p target/deploy
+        solana-keygen new --no-bip39-passphrase -f -o target/deploy/agrifund-keypair.json
+        anchor test
