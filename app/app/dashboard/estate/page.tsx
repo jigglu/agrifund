@@ -60,6 +60,44 @@ const getStatusLabelAndColor = (status: any) => {
   return { label: 'Unknown', style: 'bg-slate-500/10 border-slate-500/20 text-slate-400' };
 };
 
+const YEAR_SECONDS = 365 * 24 * 60 * 60;
+// Standard crop-finance loan term: one full growing season.
+// This is independent of the on-chain vestingDuration, which is a compressed
+// demo timer (e.g. 180 s) used only for the devnet capital-drawdown demo.
+const LOAN_TERM_DAYS = 180;
+
+interface SettlementBreakdown {
+  principal: number;        // micro-USDC
+  interest: number;         // micro-USDC
+  settlementAmount: number; // micro-USDC
+  elapsedSeconds: number;
+  termDays: number;
+  aprPct: number;
+}
+
+function computeSettlementAmount(
+  totalFundedUsdc: number,
+  aprBps: number,
+  farmingStartTime: number,
+): SettlementBreakdown {
+  const now = Math.floor(Date.now() / 1000);
+  const elapsedSeconds = Math.max(0, now - farmingStartTime);
+  const aprPct = aprBps / 100;
+  // Simple interest over the standard growing-season term.
+  // interest = principal × (aprBps / 10_000) × (LOAN_TERM_DAYS / 365)
+  const interest = Math.round(
+    totalFundedUsdc * (aprBps / 10_000) * (LOAN_TERM_DAYS / 365)
+  );
+  return {
+    principal: totalFundedUsdc,
+    interest,
+    settlementAmount: totalFundedUsdc + interest,
+    elapsedSeconds,
+    termDays: LOAN_TERM_DAYS,
+    aprPct,
+  };
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────
 export default function EstatePage() {
   const { connected, publicKey } = useWallet();
@@ -80,7 +118,7 @@ export default function EstatePage() {
   const [customRegion, setCustomRegion] = useState("");
   const [isInitializing, setIsInitializing] = useState(false);
   const [isWithdrawingMap, setIsWithdrawingMap] = useState<Record<string, boolean>>({});
-  const [repaymentAmounts, setRepaymentAmounts] = useState<Record<string, string>>({});
+
   const [isSettlingMap, setIsSettlingMap] = useState<Record<string, boolean>>({});
   const [isDefaultingMap, setIsDefaultingMap] = useState<Record<string, boolean>>({});
   const [timeTick, setTimeTick] = useState(0);
@@ -258,25 +296,21 @@ export default function EstatePage() {
     }
   };
 
-  const handleSettle = async (poolAddress: PublicKey) => {
+  const handleSettle = async (poolAddress: PublicKey, amountUsdc: number) => {
     const key = poolAddress.toBase58();
-    const amountStr = repaymentAmounts[key];
-    if (!amountStr) return;
-    
+    if (!amountUsdc || amountUsdc <= 0) return;
+
     setIsSettlingMap(prev => ({ ...prev, [key]: true }));
-    const amountFloat = parseFloat(amountStr);
-    const amountUsdc = Math.round(amountFloat * 1_000_000);
-    
+
     const logId = addLog({
       status: 'pending',
-      label: `Settle: $${amountFloat.toFixed(2)}`,
+      label: `Settle Crop: $${(amountUsdc / 1_000_000).toFixed(2)}`,
       timestamp: new Date(),
     });
 
     try {
       const { txSig } = await settlePool(poolAddress, amountUsdc);
       updateLog(logId, { status: 'success', sig: txSig });
-      setRepaymentAmounts(prev => ({ ...prev, [key]: "" }));
 
       // Optimistically update status to settled
       setMyPools(prev => prev.map(pool => {
@@ -598,39 +632,70 @@ export default function EstatePage() {
                             </button>
                           </div>
 
-                          {isFarming && (
-                            <div className="mt-3 pt-3 border-t border-slate-700/30 space-y-2">
-                              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Settle Crop Yield / Oracle Simulator</label>
-                              <div className="flex flex-col gap-2">
-                                <div className="flex gap-2">
-                                  <div className="relative flex-1">
-                                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-[11px]">$</span>
-                                    <input
-                                      type="number"
-                                      step="0.01"
-                                      placeholder="Settlement amount"
-                                      value={repaymentAmounts[pool.publicKey.toBase58()] || ""}
-                                      onChange={e => setRepaymentAmounts(prev => ({ ...prev, [pool.publicKey.toBase58()]: e.target.value }))}
-                                      className="w-full rounded-lg border border-slate-700 bg-slate-900/60 py-1.5 pl-6 pr-2 text-xs text-white placeholder-slate-600 focus:border-teal-500 focus:outline-none"
-                                    />
+                          {isFarming && (() => {
+                            const settlement = computeSettlementAmount(
+                              totalFunded,
+                              pool.account.apr || 0,
+                              farmingStartTime,
+                            );
+                            const isLocked = amountWithdrawn < totalFunded;
+                            const isSettling = !!isSettlingMap[pool.publicKey.toBase58()];
+                            return (
+                              <div className="mt-3 pt-3 border-t border-slate-700/30 space-y-2">
+                                {/* Settlement Approval Card */}
+                                <div className="rounded-xl border border-teal-500/20 bg-teal-900/10 p-3 space-y-2">
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className="text-[10px] font-bold text-teal-400 uppercase tracking-wider">💰 Settlement Summary</span>
+                                    <span className="text-[9px] bg-teal-500/10 border border-teal-500/20 text-teal-400 rounded px-1.5 py-0.5 font-medium">Auto-calculated</span>
                                   </div>
+
+                                  {/* Breakdown rows */}
+                                  <div className="space-y-1">
+                                    <div className="flex justify-between items-center">
+                                      <span className="text-[11px] text-slate-400">Principal</span>
+                                      <span className="text-[11px] font-semibold text-white">${(settlement.principal / 1_000_000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center">
+                                      <span className="text-[11px] text-slate-400">APR</span>
+                                      <span className="text-[11px] font-semibold text-white">{settlement.aprPct.toFixed(2)}%</span>
+                                    </div>
+                                    <div className="flex justify-between items-center">
+                                      <span className="text-[11px] text-slate-400">Loan Term</span>
+                                      <span className="text-[11px] font-semibold text-white">{settlement.termDays.toFixed(1)} days</span>
+                                    </div>
+                                    <div className="flex justify-between items-center">
+                                      <span className="text-[11px] text-slate-400">Interest Accrued</span>
+                                      <span className="text-[11px] font-semibold text-emerald-400">+${(settlement.interest / 1_000_000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                    </div>
+                                    <div className="h-px bg-slate-700/60 my-1" />
+                                    <div className="flex justify-between items-center">
+                                      <span className="text-xs font-bold text-white">Total Due</span>
+                                      <span className="text-sm font-extrabold text-teal-300">${(settlement.settlementAmount / 1_000_000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                                    </div>
+                                  </div>
+
+                                  {/* Locked warning */}
+                                  {isLocked && (
+                                    <p className="text-[10px] text-yellow-500/80 italic flex items-center gap-1 pt-1">
+                                      <span>⚠️</span>
+                                      <span>Settlement is locked until all capital has been drawn down.</span>
+                                    </p>
+                                  )}
+
+                                  {/* Settle CTA */}
                                   <button
-                                    onClick={() => handleSettle(pool.publicKey)}
-                                    disabled={
-                                      !!isSettlingMap[pool.publicKey.toBase58()] || 
-                                      !repaymentAmounts[pool.publicKey.toBase58()] ||
-                                      (isFarming && amountWithdrawn < totalFunded)
-                                    }
-                                    className="rounded-lg bg-gradient-to-r from-blue-600 to-indigo-500 px-3 py-2 text-xs font-bold text-white shadow hover:from-blue-500 hover:to-indigo-400 active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                                    onClick={() => handleSettle(pool.publicKey, settlement.settlementAmount)}
+                                    disabled={isSettling || isLocked}
+                                    className="mt-1 w-full rounded-lg bg-gradient-to-r from-teal-600 to-emerald-500 py-2.5 text-xs font-bold text-white shadow-lg shadow-teal-900/30 hover:from-teal-500 hover:to-emerald-400 active:scale-[0.97] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
                                   >
-                                    {isSettlingMap[pool.publicKey.toBase58()] ? '⏳' : '🤝 Settle'}
+                                    {isSettling
+                                      ? '⏳ Settling...'
+                                      : `🤝 Settle Crop — $${(settlement.settlementAmount / 1_000_000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                    }
                                   </button>
                                 </div>
-                                {isFarming && amountWithdrawn < totalFunded && (
-                                  <p className="text-[10px] text-yellow-500/80 italic mt-0.5">
-                                    ⚠️ Settlement is locked until all capital has been drawn down.
-                                  </p>
-                                )}
+
+                                {/* Trigger Default */}
                                 <button
                                   onClick={() => handleTriggerDefault(pool.publicKey)}
                                   disabled={!!isDefaultingMap[pool.publicKey.toBase58()]}
@@ -639,8 +704,8 @@ export default function EstatePage() {
                                   {isDefaultingMap[pool.publicKey.toBase58()] ? '⏳ Simulating Drought...' : '🚨 Simulate Drought (Trigger Insurance)'}
                                 </button>
                               </div>
-                            </div>
-                          )}
+                            );
+                          })()}
                         </div>
                       )}
                     </div>
