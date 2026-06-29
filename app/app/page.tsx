@@ -347,7 +347,6 @@ $ agrifund-cli invest --pool WHEAT-KE-2025 --amount 5000 USDC
           {/* Nav links (hidden on mobile) */}
           <div
             style={{
-              display: 'flex',
               alignItems: 'center',
               gap: '32px',
             }}
