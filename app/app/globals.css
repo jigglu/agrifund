@@ -1,33 +1,403 @@
 @import "tailwindcss";
 
+/* ─────────────────────────────────────────────────────────────────────────
+   DESIGN TOKENS
+   ───────────────────────────────────────────────────────────────────────── */
 :root {
-  --background: #050d14;
-  --foreground: #f1f5f9;
+  /* Backgrounds */
+  --bg-base:        #080808;
+  --bg-surface:     #0f0f0f;
+  --bg-card:        #141414;
+
+  /* Borders */
+  --border:         rgba(255, 255, 255, 0.08);
+  --border-hover:   rgba(255, 255, 255, 0.16);
+
+  /* Text */
+  --text-primary:   #ffffff;
+  --text-secondary: #888888;
+  --text-muted:     #444444;
+
+  /* Accent — green fits agriculture */
+  --accent:         #22c55e;
+  --accent-dim:     rgba(34, 197, 94, 0.12);
+  --accent-glow:    rgba(34, 197, 94, 0.25);
+
+  /* Status */
+  --danger:         #ef4444;
+  --warning:        #f59e0b;
+
+  /* Typography scale */
+  --font-display:   "Inter", system-ui, sans-serif;
+  --font-mono:      "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+
+  /* Layout */
+  --content-width:  1200px;
+  --section-py:     120px;
+  --card-radius:    16px;
+  --pill-radius:    999px;
 }
 
+/* Expose tokens to Tailwind v4 utilities */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-background:     var(--bg-base);
+  --color-foreground:     var(--text-primary);
+  --color-accent:         var(--accent);
+  --color-accent-dim:     var(--accent-dim);
+  --color-card:           var(--bg-card);
+  --color-surface:        var(--bg-surface);
+  --color-border:         var(--border);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted:     var(--text-muted);
+  --color-danger:         var(--danger);
+  --color-warning:        var(--warning);
+  --font-family-sans:     var(--font-display);
+  --font-family-mono:     var(--font-mono);
 }
 
-* {
+/* ─────────────────────────────────────────────────────────────────────────
+   BASE RESET & TYPOGRAPHY
+   ───────────────────────────────────────────────────────────────────────── */
+*, *::before, *::after {
   box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-inter, system-ui, sans-serif);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-display);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
 }
 
-/* Wallet adapter modal overrides for dark theme */
+/* ─────────────────────────────────────────────────────────────────────────
+   KEYFRAME ANIMATIONS
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* Ticker strip — infinite left scroll */
+@keyframes scroll-left {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+/* Progress pulse traveling along stepper connector */
+@keyframes progress-travel {
+  0%   { left: -20%; opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { left: 120%; opacity: 0; }
+}
+
+/* Blinking live indicator dot */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.2; }
+}
+
+/* Section reveal — fade up */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Glow pulse for accent elements */
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent-glow); }
+  50%       { box-shadow: 0 0 20px 4px var(--accent-glow); }
+}
+
+/* Number count-up placeholder (JS-driven, just needs transition) */
+@keyframes count-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Skeleton loading pulse */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   UTILITY CLASSES (used by page.tsx)
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* Ticker */
+.ticker-track {
+  display: flex;
+  gap: 12px;
+  animation: scroll-left 30s linear infinite;
+  will-change: transform;
+}
+
+.ticker-track:hover {
+  animation-play-state: paused;
+}
+
+/* Section reveal (applied via IntersectionObserver) */
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Nav scroll effect */
+nav.scrolled {
+  background: rgba(8, 8, 8, 0.92) !important;
+  border-bottom-color: var(--border) !important;
+}
+
+/* Stepper connector progress */
+.stepper-connector {
+  position: relative;
+  overflow: hidden;
+}
+
+.stepper-connector::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -20%;
+  width: 30%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: progress-travel 3s ease-in-out infinite;
+}
+
+/* Live dot blink */
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: blink 1.5s ease-in-out infinite;
+}
+
+/* Monospace font */
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+/* Gradient text utility */
+.text-gradient {
+  background: linear-gradient(135deg, #ffffff 0%, #888888 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.text-gradient-accent {
+  background: linear-gradient(135deg, var(--accent) 0%, #86efac 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Table row hover */
+.pool-row {
+  transition: background 0.15s ease;
+}
+
+.pool-row:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* Progress bar fill animation */
+.progress-fill {
+  transition: width 1.2s cubic-bezier(0.4, 0, 0.2, 1);
+  width: 0;
+}
+
+.progress-fill.animated {
+  /* Width set inline by JS/inline style */
+}
+
+/* Card hover */
+.feature-card {
+  transition: border-color 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease;
+}
+
+.feature-card:hover {
+  border-color: var(--border-hover) !important;
+  transform: translateY(-3px);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+/* Partner logo hover */
+.partner-logo {
+  filter: grayscale(1) brightness(0.5);
+  transition: filter 0.2s ease, opacity 0.2s ease;
+  opacity: 0.7;
+}
+
+.partner-logo:hover {
+  filter: none;
+  opacity: 1;
+}
+
+/* Wallet adapter overrides for dark theme */
 .wallet-adapter-modal-wrapper {
-  background: #0f172a !important;
-  border: 1px solid rgba(16, 185, 129, 0.2) !important;
+  background: #0f0f0f !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 16px !important;
 }
 
 .wallet-adapter-button-trigger {
-  background: linear-gradient(135deg, #059669, #0d9488) !important;
-  border-radius: 0.75rem !important;
+  background: var(--accent) !important;
+  color: #000 !important;
+  border-radius: var(--pill-radius) !important;
+  font-weight: 600 !important;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   REDUCED MOTION
+   ───────────────────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .ticker-track {
+    animation-duration: 60s;
+  }
+
+  .stepper-connector::after {
+    animation: none;
+  }
+
+  .live-dot {
+    animation: none;
+    opacity: 1;
+  }
+
+  .reveal {
+    transition: none;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   SCROLLBAR STYLING
+   ───────────────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-base);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--text-muted);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   RESPONSIVE GRID UTILITIES
+   ───────────────────────────────────────────────────────────────────────── */
+.responsive-layout-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+}
+@media (min-width: 1024px) {
+  .responsive-layout-grid {
+    grid-template-columns: 1fr 380px;
+  }
+}
+
+.responsive-grid-4-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+}
+@media (min-width: 768px) {
+  .responsive-grid-4-stats {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+.responsive-grid-3-features {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+}
+@media (min-width: 768px) {
+  .responsive-grid-3-features {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.responsive-grid-4-steps {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 24px;
+}
+@media (min-width: 768px) {
+  .responsive-grid-4-steps {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+.responsive-grid-2-columns {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 32px;
+}
+@media (min-width: 768px) {
+  .responsive-grid-2-columns {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.responsive-grid-2-columns-gap80 {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 40px;
+}
+@media (min-width: 768px) {
+  .responsive-grid-2-columns-gap80 {
+    grid-template-columns: 1fr 1fr;
+    gap: 80px;
+  }
+}
+
+.responsive-grid-3-cols {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+@media (min-width: 640px) {
+  .responsive-grid-3-cols {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.responsive-grid-2-columns-gap16 {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+@media (min-width: 640px) {
+  .responsive-grid-2-columns-gap16 {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+

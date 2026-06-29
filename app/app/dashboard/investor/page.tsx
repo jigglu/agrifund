@@ -6,6 +6,7 @@ import { PublicKey } from '@solana/web3.js';
 import { BN } from '@coral-xyz/anchor';
 import { useAgriFund, type OnChainPool } from '@/hooks/useAgriFund';
 import { getAssociatedTokenAddress } from '@solana/spl-token';
+import React from 'react';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 interface TxLog {
@@ -17,151 +18,92 @@ interface TxLog {
   timestamp: Date;
 }
 
-// ── Static catalog metadata (display labels, APR etc.) ────────────────────
-// The on-chain data now stores crop_name. We enrich it with
-// display metadata keyed by cropName.
 interface PoolMeta {
   farmer: string;
   crop: string;
   region: string;
-  avatar: string;
-  apr: string;
   category: string;
+  apr: string;
 }
 
 const getPoolMeta = (pool: OnChainPool | null): PoolMeta => {
-  if (!pool) return {
-    farmer: 'Unknown Farmer',
-    crop: 'Unknown Crop',
-    region: 'Unknown Region',
-    avatar: '🌱',
-    apr: '0.0%',
-    category: 'Other'
-  };
-  const apr = pool.account.apr ? `${(pool.account.apr / 100).toFixed(1)}%` : '0.0%';
-  const category = pool.account.category || 'Other';
-  
-  // Choose avatar based on category or crop name
-  const cropLower = pool.account.cropName?.toLowerCase() || '';
-  const categoryLower = category.toLowerCase();
-  let avatar = '🌱';
-  if (categoryLower.includes('coffee') || cropLower.includes('coffee')) {
-    avatar = '☕';
-  } else if (categoryLower.includes('grain') || cropLower.includes('rice') || cropLower.includes('wheat') || cropLower.includes('grain')) {
-    avatar = '🌾';
-  } else if (categoryLower.includes('oil') || cropLower.includes('sesame') || cropLower.includes('seed')) {
-    avatar = '🌻';
-  } else if (cropLower.includes('tea')) {
-    avatar = '🍃';
-  }
-  
+  if (!pool) return { farmer: 'Unknown', crop: 'Unknown', region: 'Unknown', category: 'Other', apr: '0.0%' };
   return {
     farmer: pool.account.estateName || `Farm ${pool.account.authority.toBase58().slice(0, 4)}`,
     crop: pool.account.cropName || 'Unknown Crop',
     region: pool.account.region || 'Decentralized',
-    avatar,
-    apr,
-    category
+    category: pool.account.category || 'Other',
+    apr: pool.account.apr ? `${(pool.account.apr / 100).toFixed(1)}%` : '0.0%',
   };
 };
 
 const PRESET_AMOUNTS = [100, 500, 1_000, 5_000];
-const FILTERS        = ['All', 'Grains', 'Coffee', 'Oils'] as const;
+const FILTERS = ['All', 'Grains', 'Coffee', 'Oils'] as const;
 type Filter = typeof FILTERS[number];
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-/** Convert micro-USDC BN to USD number */
-const toUsdc = (microUsdc: number) => microUsdc / 1_000_000;
+const toUsdc = (v: number) => v / 1_000_000;
+const pct = (funded: number, goal: number) => goal > 0 ? Math.min((funded / goal) * 100, 100) : 0;
+const deriveGoal = (pool: OnChainPool) => pool.account.totalYieldKg.toNumber() * pool.account.pricePerKg.toNumber();
 
-const getStatusLabelAndColor = (status: any) => {
-  if (!status) return { label: '● Pool Open', style: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' };
-  if (status.open !== undefined) return { label: '● Pool Open', style: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' };
-  if (status.farming !== undefined) return { label: '🌾 Farming', style: 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400' };
-  if (status.settled !== undefined) return { label: '✅ Settled', style: 'bg-teal-500/10 border-teal-500/30 text-teal-400' };
-  if (status.defaulted !== undefined) return { label: '⚠️ Defaulted', style: 'bg-red-500/10 border-red-500/30 text-red-400' };
-  return { label: 'Unknown', style: 'bg-slate-500/10 border-slate-500/30 text-slate-400' };
+/* ── Status pill ─────────────────────────────────────────────────────────── */
+const StatusPill = ({ status }: { status: any }) => {
+  let label = 'Pool Open', color = '#22c55e', bg = 'rgba(34,197,94,0.1)';
+  if (status?.farming !== undefined)  { label = 'Farming';   color = '#f59e0b'; bg = 'rgba(245,158,11,0.1)'; }
+  if (status?.settled !== undefined)  { label = 'Settled';   color = '#888888'; bg = 'rgba(136,136,136,0.1)'; }
+  if (status?.defaulted !== undefined){ label = 'Defaulted'; color = '#ef4444'; bg = 'rgba(239,68,68,0.1)'; }
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '3px 10px', borderRadius: '999px', background: bg, color, fontSize: '11px', fontWeight: 500, border: `1px solid ${color}33`, flexShrink: 0 }}>
+      <span style={{ width: 5, height: 5, borderRadius: '50%', background: color }} />
+      {label}
+    </span>
+  );
 };
 
-/** Derive the goal from on-chain data: totalYieldKg × pricePerKg (micro-USDC) */
-const deriveGoal = (pool: OnChainPool) =>
-  pool.account.totalYieldKg.toNumber() * pool.account.pricePerKg.toNumber();
-
-/** Funding % clamped to 100 */
-const pct = (funded: number, goal: number) =>
-  goal > 0 ? Math.min((funded / goal) * 100, 100) : 0;
-
-// ── Sub-components ─────────────────────────────────────────────────────────
-const AssetRiskProfile = ({ pool, meta }: { pool: OnChainPool; meta: PoolMeta }) => {
-  const yieldKg  = pool.account.totalYieldKg.toNumber();
+/* ── Tx badge ───────────────────────────────────────────────────────────── */
+const TxBadge = ({ log }: { log: TxLog }) => {
+  const cfg = {
+    pending: { border: 'rgba(245,158,11,0.2)', bg: 'rgba(245,158,11,0.06)', text: '#f59e0b', icon: '◌' },
+    success: { border: 'rgba(34,197,94,0.2)',  bg: 'rgba(34,197,94,0.06)',  text: '#22c55e', icon: '✓' },
+    error:   { border: 'rgba(239,68,68,0.2)',  bg: 'rgba(239,68,68,0.06)',  text: '#ef4444', icon: '✕' },
+  }[log.status];
   return (
-    <div className="rounded-xl border border-teal-500/20 bg-teal-900/10 p-4 mt-3">
-      <div className="flex items-center gap-2 mb-3">
-        <span className="text-sm">🛡️</span>
-        <span className="text-xs font-bold uppercase tracking-widest text-teal-400">Asset Risk Profile</span>
+    <div style={{ borderRadius: '10px', border: `1px solid ${cfg.border}`, background: cfg.bg, padding: '10px 12px', fontSize: '12px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: log.sig ? '4px' : 0 }}>
+        <span style={{ fontWeight: 600, color: cfg.text }}>{cfg.icon} {log.label}</span>
+        <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{log.timestamp.toLocaleTimeString()}</span>
       </div>
-      <div className="space-y-1.5 text-xs">
-        {[
-          { label: 'Insurance',    value: 'Active (Flood & Drought)' },
-          { label: 'Auditor',      value: 'Regional AgriCorp'        },
-          { label: 'Settlement',   value: 'USDC on Solana'           },
-          { label: 'Oracle Feed',  value: 'Chainlink Weather API'    },
-          { label: 'Collateral',   value: `${yieldKg.toLocaleString()} kg ${meta.crop}` },
-          { label: 'Expected APR', value: meta.apr                   },
-        ].map(row => (
-          <div key={row.label}
-            className="flex items-center justify-between gap-3 rounded-lg bg-slate-800/60 px-3 py-1.5">
-            <span className="text-slate-500">{row.label}</span>
-            <span className="font-medium text-emerald-400">✓ {row.value}</span>
-          </div>
-        ))}
-      </div>
+      {log.sig && (
+        <a href={`https://explorer.solana.com/tx/${log.sig}?cluster=devnet`} target="_blank" rel="noopener noreferrer"
+          style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--accent)', textDecoration: 'underline', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {log.sig.slice(0, 32)}…
+        </a>
+      )}
+      {log.error && <p style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--danger)', marginTop: '3px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.error}</p>}
     </div>
   );
 };
 
-const ProgressBar = ({ funded, goal }: { funded: number; goal: number }) => {
-  const percentage = pct(funded, goal);
-  const fundedUsd  = toUsdc(funded);
-  const goalUsd    = toUsdc(goal);
-  return (
-    <div>
-      <div className="flex justify-between text-xs text-slate-500 mb-1.5">
-        <span>${fundedUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
-        <span>{percentage.toFixed(1)}% filled</span>
-      </div>
-      <div className="h-1.5 rounded-full bg-slate-700 overflow-hidden">
-        <div
-          className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-700"
-          style={{ width: `${percentage}%` }}
-        />
-      </div>
-      <p className="mt-1 text-right text-xs text-slate-500">
-        Goal: ${goalUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-      </p>
+/* ── Asset Risk Profile ─────────────────────────────────────────────────── */
+const AssetRiskProfile = ({ pool, meta }: { pool: OnChainPool; meta: PoolMeta }) => (
+  <div style={{ padding: '16px', borderRadius: '10px', background: 'rgba(34,197,94,0.04)', border: '1px solid rgba(34,197,94,0.12)' }}>
+    <div style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--accent)', marginBottom: '12px' }}>
+      Asset Risk Profile
     </div>
-  );
-};
-
-const TxBadge = ({ log }: { log: TxLog }) => (
-  <div className={`rounded-xl border p-3 text-xs ${
-    log.status === 'pending' ? 'border-yellow-500/30 bg-yellow-500/5 text-yellow-400' :
-    log.status === 'success' ? 'border-emerald-500/30 bg-emerald-500/5 text-emerald-400' :
-    'border-red-500/30 bg-red-500/5 text-red-400'
-  }`}>
-    <div className="flex items-center justify-between mb-1">
-      <span className="font-semibold">
-        {log.status === 'pending' ? '⏳' : log.status === 'success' ? '✅' : '❌'} {log.label}
-      </span>
-      <span className="text-slate-500">{log.timestamp.toLocaleTimeString()}</span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      {[
+        { label: 'Insurance',    value: 'Active (Flood & Drought)' },
+        { label: 'Auditor',      value: 'Regional AgriCorp'        },
+        { label: 'Settlement',   value: 'USDC on Solana'           },
+        { label: 'Oracle Feed',  value: 'Chainlink Weather API'    },
+        { label: 'Collateral',   value: `${pool.account.totalYieldKg.toNumber().toLocaleString()} kg ${meta.crop}` },
+        { label: 'Expected APR', value: meta.apr                   },
+      ].map(row => (
+        <div key={row.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', padding: '6px 10px', borderRadius: '7px', background: 'var(--bg-surface)' }}>
+          <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{row.label}</span>
+          <span style={{ fontSize: '11px', fontWeight: 500, color: 'var(--accent)' }}>✓ {row.value}</span>
+        </div>
+      ))}
     </div>
-    {log.sig && (
-      <a href={`https://explorer.solana.com/tx/${log.sig}?cluster=devnet`}
-        target="_blank" rel="noopener noreferrer"
-        className="font-mono text-[10px] text-emerald-500 underline hover:text-emerald-300 truncate block transition-colors">
-        🔗 {log.sig.slice(0, 28)}…
-      </a>
-    )}
-    {log.error && <p className="font-mono text-[10px] text-red-400 truncate">{log.error}</p>}
   </div>
 );
 
@@ -171,602 +113,315 @@ export default function InvestorPage() {
   const { connected, publicKey } = useWallet();
   const { isReady, program, fundYield, claimYield, refundInvestment, fetchAllPools } = useAgriFund();
 
-  // ── Live on-chain state ──────────────────────────────────────────────────
-  const [livePools, setLivePools]         = useState<OnChainPool[]>([]);
-  const [isFetching, setIsFetching]       = useState(false);
-  const fetchedRef                        = useRef(false); // prevent double-fetch on strict mode
-
-  // ── UI state ─────────────────────────────────────────────────────────────
-  const [selectedIdx, setSelectedIdx]   = useState(0);
+  const [livePools, setLivePools]             = useState<OnChainPool[]>([]);
+  const [isFetching, setIsFetching]           = useState(false);
+  const fetchedRef                            = useRef(false);
+  const [selectedIdx, setSelectedIdx]         = useState(0);
   const [selectedPoolKey, setSelectedPoolKey] = useState<string>('');
-  const [investAmount, setInvestAmount] = useState('');
-  const [isFunding, setIsFunding]       = useState(false);
-  const [isClaiming, setIsClaiming]     = useState(false);
-  const [isRefunding, setIsRefunding]   = useState(false);
-  const [receiptBalance, setReceiptBalance] = useState<number>(0);
-  const [txLogs, setTxLogs]             = useState<TxLog[]>([]);
-  const [activeFilter, setActiveFilter] = useState<Filter>('All');
-  interface ToastConfig {
-    title: string;
-    message: string;
-    icon: string;
-  }
-  const [successToast, setSuccessToast] = useState<ToastConfig | null>(null);
-  const [activeTab, setActiveTab]       = useState<'deposit' | 'refund'>('deposit');
-  const [refundAmount, setRefundAmount] = useState('');
+  const [investAmount, setInvestAmount]       = useState('');
+  const [isFunding, setIsFunding]             = useState(false);
+  const [isClaiming, setIsClaiming]           = useState(false);
+  const [isRefunding, setIsRefunding]         = useState(false);
+  const [receiptBalance, setReceiptBalance]   = useState<number>(0);
+  const [txLogs, setTxLogs]                   = useState<TxLog[]>([]);
+  const [activeFilter, setActiveFilter]       = useState<Filter>('All');
+  const [successToast, setSuccessToast]       = useState<{ title: string; message: string } | null>(null);
+  const [activeTab, setActiveTab]             = useState<'deposit' | 'refund'>('deposit');
+  const [refundAmount, setRefundAmount]       = useState('');
+  const [mounted, setMounted]                 = useState(false);
 
-  const [mounted, setMounted]           = useState(false);
   useEffect(() => setMounted(true), []);
-
-  useEffect(() => {
-    if (receiptBalance === 0) {
-      setActiveTab('deposit');
-    }
-  }, [receiptBalance]);
-  
-  useEffect(() => {
-    if (successToast) {
-      const timer = setTimeout(() => setSuccessToast(null), 8000);
-      return () => clearTimeout(timer);
-    }
-  }, [successToast]);
-
-
-
-  // Auto-default selectedPoolKey when live data arrives
-  useEffect(() => {
-    if (livePools.length > 0 && !selectedPoolKey) {
-      setSelectedPoolKey(livePools[selectedIdx]?.publicKey.toBase58() ?? '');
-    }
-  }, [livePools, selectedIdx, selectedPoolKey]);
-
-  // Keep selectedPoolKey in sync when the user switches pool in the dropdown or card list
-  useEffect(() => {
-    if (livePools[selectedIdx]) {
-      setSelectedPoolKey(livePools[selectedIdx].publicKey.toBase58());
-    }
-  }, [selectedIdx, livePools]);
-
-  // Select active pool based on query parameter (?pool=ADDRESS)
+  useEffect(() => { if (receiptBalance === 0) setActiveTab('deposit'); }, [receiptBalance]);
+  useEffect(() => { if (successToast) { const t = setTimeout(() => setSuccessToast(null), 8000); return () => clearTimeout(t); } }, [successToast]);
+  useEffect(() => { if (livePools.length > 0 && !selectedPoolKey) setSelectedPoolKey(livePools[selectedIdx]?.publicKey.toBase58() ?? ''); }, [livePools, selectedIdx, selectedPoolKey]);
+  useEffect(() => { if (livePools[selectedIdx]) setSelectedPoolKey(livePools[selectedIdx].publicKey.toBase58()); }, [selectedIdx, livePools]);
   useEffect(() => {
     if (typeof window !== 'undefined' && livePools.length > 0) {
-      const params = new URLSearchParams(window.location.search);
-      const poolParam = params.get('pool');
-      if (poolParam) {
-        const idx = livePools.findIndex(p => p.publicKey.toBase58() === poolParam);
-        if (idx !== -1) {
-          setSelectedIdx(idx);
-          setSelectedPoolKey(poolParam);
-        }
-      }
+      const p = new URLSearchParams(window.location.search).get('pool');
+      if (p) { const idx = livePools.findIndex(x => x.publicKey.toBase58() === p); if (idx !== -1) { setSelectedIdx(idx); setSelectedPoolKey(p); } }
     }
   }, [livePools]);
 
-  // ── Marketplace refresh ──────────────────────────────────────────────────
   const refreshMarketplace = useCallback(async () => {
     if (!isReady) return;
     setIsFetching(true);
-    try {
-      const pools = await fetchAllPools();
-      setLivePools(pools);
-    } finally {
-      setIsFetching(false);
-    }
+    try { setLivePools(await fetchAllPools()); } finally { setIsFetching(false); }
   }, [isReady, fetchAllPools]);
 
   const fetchReceiptBalance = useCallback(async () => {
-    const currentPool = livePools[selectedIdx];
-    if (!connection || !publicKey || !currentPool) {
-      setReceiptBalance(0);
-      return;
-    }
-    try {
-      const receiptMint = currentPool.account.receiptMint;
-      const investorReceiptAta = await getAssociatedTokenAddress(receiptMint, publicKey);
-      const balanceResponse = await connection.getTokenAccountBalance(investorReceiptAta);
-      setReceiptBalance(balanceResponse.value.uiAmount ?? 0);
-    } catch (e) {
-      setReceiptBalance(0);
-    }
+    const pool = livePools[selectedIdx];
+    if (!connection || !publicKey || !pool) { setReceiptBalance(0); return; }
+    try { const ata = await getAssociatedTokenAddress(pool.account.receiptMint, publicKey); setReceiptBalance((await connection.getTokenAccountBalance(ata)).value.uiAmount ?? 0); }
+    catch { setReceiptBalance(0); }
   }, [connection, publicKey, livePools, selectedIdx]);
 
-
-
-  // A helper to refresh multiple times to ensure RPC consistency
   const refreshWithRetry = useCallback(async () => {
-    // Refresh immediately
-    await refreshMarketplace();
-    await fetchReceiptBalance();
-    
-    // Refresh again after 1s
-    setTimeout(async () => {
-      await refreshMarketplace();
-      await fetchReceiptBalance();
-    }, 1000);
-
-    // Refresh again after 2.5s
-    setTimeout(async () => {
-      await refreshMarketplace();
-      await fetchReceiptBalance();
-    }, 2500);
+    await refreshMarketplace(); await fetchReceiptBalance();
+    setTimeout(async () => { await refreshMarketplace(); await fetchReceiptBalance(); }, 1000);
+    setTimeout(async () => { await refreshMarketplace(); await fetchReceiptBalance(); }, 2500);
   }, [refreshMarketplace, fetchReceiptBalance]);
 
-  // Fetch on mount/wallet ready
-  useEffect(() => {
-    if (!isReady || fetchedRef.current) return;
-    fetchedRef.current = true;
-    refreshMarketplace();
-  }, [isReady, refreshMarketplace]);
-
-  useEffect(() => {
-    fetchReceiptBalance();
-  }, [fetchReceiptBalance, livePools, selectedIdx]);
-
-
+  useEffect(() => { if (!isReady || fetchedRef.current) return; fetchedRef.current = true; refreshMarketplace(); }, [isReady, refreshMarketplace]);
+  useEffect(() => { fetchReceiptBalance(); }, [fetchReceiptBalance, livePools, selectedIdx]);
 
   useEffect(() => {
     if (!isReady || !program) return;
-
-    const refresh = () => {
-      refreshMarketplace();
-      fetchReceiptBalance();
-    };
-
+    const refresh = () => { refreshMarketplace(); fetchReceiptBalance(); };
     const listeners = [
-      program.addEventListener('YieldFunded', refresh),
-      program.addEventListener('CapitalWithdrawn', refresh),
-      program.addEventListener('PoolSettled', refresh),
-      program.addEventListener('DefaultTriggered', refresh),
-      program.addEventListener('YieldClaimed', refresh),
-      program.addEventListener('InvestmentRefunded', refresh),
+      program.addEventListener('YieldFunded', refresh), program.addEventListener('CapitalWithdrawn', refresh),
+      program.addEventListener('PoolSettled', refresh), program.addEventListener('DefaultTriggered', refresh),
+      program.addEventListener('YieldClaimed', refresh), program.addEventListener('InvestmentRefunded', refresh),
     ];
-
-    return () => {
-      listeners.forEach(id => {
-        try {
-          program.removeEventListener(id);
-        } catch (e) {
-          // ignore
-        }
-      });
-    };
+    return () => { listeners.forEach(id => { try { program.removeEventListener(id); } catch { } }); };
   }, [isReady, program, refreshMarketplace, fetchReceiptBalance]);
 
-  // ── Derived display data ─────────────────────────────────────────────────
-  // Only surface entries that have a confirmed on-chain account.
-  // We enrich the live on-chain data with static CATALOG metadata based on cropName.
-  const mergedPools = livePools.map(livePool => {
-    const meta = getPoolMeta(livePool);
-    return { meta, livePool };
-  });
-
-  const filteredMerged = activeFilter === 'All'
-    ? mergedPools
-    : mergedPools.filter(p => p.livePool.account.category.toLowerCase() === activeFilter.toLowerCase());
-
+  const mergedPools = livePools.map(livePool => ({ meta: getPoolMeta(livePool), livePool }));
+  const filteredMerged = activeFilter === 'All' ? mergedPools : mergedPools.filter(p => p.livePool.account.category.toLowerCase() === activeFilter.toLowerCase());
   const selectedPool = livePools[selectedIdx];
-
-  const selectedItem = mergedPools.find((_, i) => i === selectedIdx) ?? mergedPools[0] ?? {
-    meta: getPoolMeta(null),
-    livePool: null,
-  };
-
+  const selectedItem = mergedPools.find((_, i) => i === selectedIdx) ?? mergedPools[0] ?? { meta: getPoolMeta(null), livePool: null };
   const isPoolOpen = !selectedItem.livePool || selectedItem.livePool.account.status.open !== undefined;
   const isClaimable = !!selectedItem.livePool && (selectedItem.livePool.account.status.settled !== undefined || selectedItem.livePool.account.status.defaulted !== undefined);
   const isDefaulted = !!selectedItem.livePool && selectedItem.livePool.account.status.defaulted !== undefined;
 
-  // ── Transaction helpers ───────────────────────────────────────────────────
-  const addLog = useCallback((log: Omit<TxLog, 'id'>) => {
-    const id = Math.random().toString(36).slice(2);
-    setTxLogs(prev => [{ ...log, id }, ...prev].slice(0, 10));
-    return id;
-  }, []);
-
-  const updateLog = useCallback((id: string, patch: Partial<TxLog>) =>
-    setTxLogs(prev => prev.map(l => l.id === id ? { ...l, ...patch } : l)), []);
+  const addLog = useCallback((log: Omit<TxLog, 'id'>) => { const id = Math.random().toString(36).slice(2); setTxLogs(prev => [{ ...log, id }, ...prev].slice(0, 10)); return id; }, []);
+  const updateLog = useCallback((id: string, patch: Partial<TxLog>) => setTxLogs(prev => prev.map(l => l.id === id ? { ...l, ...patch } : l)), []);
 
   const handleFund = useCallback(async () => {
-    // Guard 1: basics
     if (!isReady || !investAmount || !selectedPoolKey) return;
-
-    // Guard 2: selectedPoolKey must match an active initialized pool on-chain
     const matchedPool = livePools.find(p => p.publicKey.toBase58() === selectedPoolKey);
     const matchedPoolOpen = matchedPool && matchedPool.account.status.open !== undefined;
-    if (!matchedPool || !matchedPoolOpen) {
-      addLog({
-        status: 'error',
-        label: 'Pool not initialized or open',
-        timestamp: new Date(),
-        error: matchedPool
-          ? 'This pool is closed and no longer accepting funds.'
-          : 'Selected pool does not exist on-chain. Please choose an initialized pool.',
-      });
-      return;
-    }
-
+    if (!matchedPool || !matchedPoolOpen) { addLog({ status: 'error', label: 'Pool not open', timestamp: new Date(), error: matchedPool ? 'Pool is closed.' : 'Pool not found on-chain.' }); return; }
     let poolPublicKey: PublicKey;
-    try {
-      poolPublicKey = new PublicKey(selectedPoolKey);
-    } catch {
-      addLog({ status: 'error', label: 'Invalid pool key', timestamp: new Date(),
-        error: 'Selected pool has an invalid public key.' });
-      return;
-    }
-
+    try { poolPublicKey = new PublicKey(selectedPoolKey); } catch { addLog({ status: 'error', label: 'Invalid pool key', timestamp: new Date(), error: 'Invalid public key.' }); return; }
     setIsFunding(true);
     const amountFloat = parseFloat(investAmount);
-    const amountUsdc  = Math.round(amountFloat * 1_000_000);
-
-    // Guard 3: amount must be positive
-    if (amountFloat <= 0) {
-      addLog({ status: 'error', label: 'Invalid amount', timestamp: new Date(),
-        error: 'Amount must be greater than zero.' });
-      setIsFunding(false);
-      return;
-    }
-
-    // Guard 4: amount must not exceed remaining pool capacity (client-side mirror of on-chain check)
-    const goalMicro      = matchedPool.account.totalYieldKg.toNumber() * matchedPool.account.pricePerKg.toNumber();
-    const fundedMicro    = matchedPool.account.totalFundedUsdc.toNumber();
-    const remainingMicro = Math.max(goalMicro - fundedMicro, 0);
-    if (amountUsdc > remainingMicro) {
-      const remainingUsd = (remainingMicro / 1_000_000).toLocaleString(undefined, { maximumFractionDigits: 2 });
-      addLog({
-        status: 'error',
-        label: 'Amount exceeds pool capacity',
-        timestamp: new Date(),
-        error: `Maximum fundable amount is $${remainingUsd}. Reduce your investment.`,
-      });
-      setIsFunding(false);
-      return;
-    }
-
-    const logId = addLog({
-      status: 'pending',
-      label: `Fund ${matchedPool.account.cropName} — $${investAmount}`,
-      timestamp: new Date(),
-    });
-
+    const amountUsdc = Math.round(amountFloat * 1_000_000);
+    if (amountFloat <= 0) { addLog({ status: 'error', label: 'Invalid amount', timestamp: new Date(), error: 'Amount must be > 0.' }); setIsFunding(false); return; }
+    const goalMicro = matchedPool.account.totalYieldKg.toNumber() * matchedPool.account.pricePerKg.toNumber();
+    const remainingMicro = Math.max(goalMicro - matchedPool.account.totalFundedUsdc.toNumber(), 0);
+    if (amountUsdc > remainingMicro) { addLog({ status: 'error', label: 'Exceeds capacity', timestamp: new Date(), error: `Max: $${(remainingMicro / 1_000_000).toFixed(2)}` }); setIsFunding(false); return; }
+    const logId = addLog({ status: 'pending', label: `Fund ${matchedPool.account.cropName} — $${investAmount}`, timestamp: new Date() });
     try {
       const { txSig } = await fundYield(poolPublicKey, amountUsdc);
       updateLog(logId, { status: 'success', sig: txSig });
-      
-      const formattedAmount = parseFloat(investAmount).toLocaleString(undefined, { minimumFractionDigits: 2 });
-      setSuccessToast({
-        title: 'Receipt Tokens Minted',
-        message: `Transaction Successful! You received ${formattedAmount} Pool Receipt Tokens in your wallet.`,
-        icon: '🎉',
-      });
-      
+      setSuccessToast({ title: 'Receipt Tokens Minted', message: `You received ${parseFloat(investAmount).toFixed(2)} Pool Receipt Tokens.` });
       setInvestAmount('');
-
-      // Optimistically update local states immediately upon success
-      setLivePools(prev => prev.map(pool => {
-        if (pool.publicKey.toBase58() === selectedPoolKey) {
-          return {
-            ...pool,
-            account: {
-              ...pool.account,
-              totalFundedUsdc: pool.account.totalFundedUsdc.add(new BN(amountUsdc))
-            }
-          };
-        }
-        return pool;
-      }));
+      setLivePools(prev => prev.map(pool => pool.publicKey.toBase58() === selectedPoolKey ? { ...pool, account: { ...pool.account, totalFundedUsdc: pool.account.totalFundedUsdc.add(new BN(amountUsdc)) } } : pool));
       setReceiptBalance(prev => prev + amountFloat);
-
-      // Close the transaction loop: re-fetch on-chain state immediately with retries
       await refreshWithRetry();
-    } catch (e: unknown) {
-      updateLog(logId, { status: 'error', error: e instanceof Error ? e.message : String(e) });
-    } finally {
-      setIsFunding(false);
-    }
-  }, [isReady, investAmount, selectedPoolKey, livePools, selectedItem, fundYield, addLog, updateLog, refreshWithRetry]);
+    } catch (e: unknown) { updateLog(logId, { status: 'error', error: e instanceof Error ? e.message : String(e) }); }
+    finally { setIsFunding(false); }
+  }, [isReady, investAmount, selectedPoolKey, livePools, fundYield, addLog, updateLog, refreshWithRetry]);
 
   const handleClaim = useCallback(async () => {
     if (!isReady || !selectedPoolKey) return;
-    
     let poolPublicKey: PublicKey;
-    try {
-      poolPublicKey = new PublicKey(selectedPoolKey);
-    } catch {
-      addLog({ status: 'error', label: 'Invalid pool key', timestamp: new Date(),
-        error: 'Selected pool has an invalid public key.' });
-      return;
-    }
-
+    try { poolPublicKey = new PublicKey(selectedPoolKey); } catch { addLog({ status: 'error', label: 'Invalid pool key', timestamp: new Date(), error: 'Invalid key.' }); return; }
     setIsClaiming(true);
     const matchedPool = livePools.find(p => p.publicKey.toBase58() === selectedPoolKey);
-    const logId = addLog({
-      status: 'pending',
-      label: `Claim Yield — ${matchedPool?.account.cropName || 'Pool'}`,
-      timestamp: new Date(),
-    });
-
+    const logId = addLog({ status: 'pending', label: `Claim Yield — ${matchedPool?.account.cropName || 'Pool'}`, timestamp: new Date() });
     try {
       const { txSig } = await claimYield(poolPublicKey);
       updateLog(logId, { status: 'success', sig: txSig });
-      setSuccessToast({
-        title: 'USDC Yield Claimed',
-        message: `Transaction Successful! You successfully claimed your USDC yield share in your wallet.`,
-        icon: '💰',
-      });
-      
-      // Optimistically update local states immediately upon success
+      setSuccessToast({ title: 'USDC Yield Claimed', message: 'Your USDC yield share has been sent to your wallet.' });
       setReceiptBalance(0);
-
       await refreshWithRetry();
-    } catch (e: unknown) {
-      updateLog(logId, { status: 'error', error: e instanceof Error ? e.message : String(e) });
-    } finally {
-      setIsClaiming(false);
-    }
+    } catch (e: unknown) { updateLog(logId, { status: 'error', error: e instanceof Error ? e.message : String(e) }); }
+    finally { setIsClaiming(false); }
   }, [isReady, selectedPoolKey, livePools, claimYield, addLog, updateLog, refreshWithRetry]);
 
   const handleRefund = useCallback(async () => {
     if (!isReady || !selectedPoolKey || !refundAmount) return;
-
     let poolPublicKey: PublicKey;
-    try {
-      poolPublicKey = new PublicKey(selectedPoolKey);
-    } catch {
-      addLog({ status: 'error', label: 'Invalid pool key', timestamp: new Date(),
-        error: 'Selected pool has an invalid public key.' });
-      return;
-    }
-
+    try { poolPublicKey = new PublicKey(selectedPoolKey); } catch { addLog({ status: 'error', label: 'Invalid key', timestamp: new Date(), error: 'Invalid key.' }); return; }
     const amountFloat = parseFloat(refundAmount);
-    if (isNaN(amountFloat) || amountFloat <= 0) {
-      addLog({ status: 'error', label: 'Invalid refund amount', timestamp: new Date(),
-        error: 'Amount must be greater than zero.' });
-      return;
-    }
-
-    if (amountFloat > receiptBalance) {
-      addLog({ status: 'error', label: 'Refund exceeds balance', timestamp: new Date(),
-        error: `Maximum refundable amount is $${receiptBalance.toFixed(2)}.` });
-      return;
-    }
-
+    if (isNaN(amountFloat) || amountFloat <= 0) { addLog({ status: 'error', label: 'Invalid amount', timestamp: new Date(), error: 'Amount must be > 0.' }); return; }
+    if (amountFloat > receiptBalance) { addLog({ status: 'error', label: 'Exceeds balance', timestamp: new Date(), error: `Max: $${receiptBalance.toFixed(2)}` }); return; }
     setIsRefunding(true);
     const amountUsdc = Math.round(amountFloat * 1_000_000);
-
     const matchedPool = livePools.find(p => p.publicKey.toBase58() === selectedPoolKey);
-    const logId = addLog({
-      status: 'pending',
-      label: `Refund ${matchedPool?.account.cropName || 'Pool'} — $${amountFloat.toFixed(2)}`,
-      timestamp: new Date(),
-    });
-
+    const logId = addLog({ status: 'pending', label: `Refund ${matchedPool?.account.cropName || 'Pool'} — $${amountFloat.toFixed(2)}`, timestamp: new Date() });
     try {
       const { txSig } = await refundInvestment(poolPublicKey, amountUsdc);
       updateLog(logId, { status: 'success', sig: txSig });
-      
-      const formattedAmount = amountFloat.toLocaleString(undefined, { minimumFractionDigits: 2 });
-      setSuccessToast({
-        title: 'Investment Refunded',
-        message: `Refund Successful! You returned ${formattedAmount} Pool Receipt Tokens and received your USDC back.`,
-        icon: '↩️',
-      });
-      
+      setSuccessToast({ title: 'Investment Refunded', message: `Returned ${amountFloat.toFixed(2)} tokens. USDC returned to wallet.` });
       setRefundAmount('');
-
-      // Optimistically update local states immediately upon success
-      setLivePools(prev => prev.map(pool => {
-        if (pool.publicKey.toBase58() === selectedPoolKey) {
-          return {
-            ...pool,
-            account: {
-              ...pool.account,
-              totalFundedUsdc: pool.account.totalFundedUsdc.sub(new BN(amountUsdc))
-            }
-          };
-        }
-        return pool;
-      }));
+      setLivePools(prev => prev.map(pool => pool.publicKey.toBase58() === selectedPoolKey ? { ...pool, account: { ...pool.account, totalFundedUsdc: pool.account.totalFundedUsdc.sub(new BN(amountUsdc)) } } : pool));
       setReceiptBalance(prev => prev - amountFloat);
-
       await refreshWithRetry();
-    } catch (e: unknown) {
-      updateLog(logId, { status: 'error', error: e instanceof Error ? e.message : String(e) });
-    } finally {
-      setIsRefunding(false);
-    }
+    } catch (e: unknown) { updateLog(logId, { status: 'error', error: e instanceof Error ? e.message : String(e) }); }
+    finally { setIsRefunding(false); }
   }, [isReady, selectedPoolKey, refundAmount, receiptBalance, livePools, refundInvestment, addLog, updateLog, refreshWithRetry]);
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  /* ── Render ── */
   return (
-    <div className="relative mx-auto max-w-7xl px-4 py-8 sm:px-6">
+    <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '32px 24px', position: 'relative' }}>
+
+      {/* Success toast */}
       {successToast && (
-        <div className="fixed bottom-5 right-5 z-55 flex max-w-md items-center gap-3 rounded-2xl border border-emerald-500/30 bg-slate-900/90 p-4 shadow-xl backdrop-blur-md transition-all">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400 text-lg">
-            {successToast.icon}
-          </span>
-          <div className="flex-1 min-w-0">
-            <h4 className="text-xs font-bold text-white uppercase tracking-wider">{successToast.title}</h4>
-            <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">{successToast.message}</p>
+        <div style={{ position: 'fixed', bottom: '24px', right: '24px', zIndex: 200, maxWidth: '380px', display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '16px 18px', borderRadius: 'var(--card-radius)', border: '1px solid rgba(34,197,94,0.2)', background: 'rgba(15,15,15,0.95)', backdropFilter: 'blur(20px)', boxShadow: '0 24px 60px rgba(0,0,0,0.6)' }}>
+          <div style={{ width: 32, height: 32, borderRadius: '8px', background: 'var(--accent-dim)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <span style={{ color: 'var(--accent)', fontSize: '16px', fontWeight: 700 }}>✓</span>
           </div>
-          <button 
-            onClick={() => setSuccessToast(null)} 
-            className="text-slate-500 hover:text-slate-350 transition-colors p-1"
-          >
-            ✕
-          </button>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h4 style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: '4px' }}>{successToast.title}</h4>
+            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>{successToast.message}</p>
+          </div>
+          <button onClick={() => setSuccessToast(null)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '16px', lineHeight: 1, flexShrink: 0 }}>✕</button>
         </div>
       )}
-      <div className="pointer-events-none fixed inset-0 -z-10">
-        <div className="absolute top-0 right-0 h-[600px] w-[500px] rounded-full bg-teal-900/15 blur-3xl" />
-      </div>
 
       {/* Page header */}
-      <div className="mb-8">
-        <div className="flex items-center gap-3 mb-2">
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-teal-500/10 text-xl">📊</span>
-          <div>
-            <h1 className="text-2xl font-extrabold text-white">Investor Marketplace</h1>
-            <p className="text-sm text-slate-500">
-              Fund verified agricultural yield pools and earn transparent on-chain returns
-            </p>
+      <div style={{ marginBottom: '32px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+        <div>
+          <div style={{ fontSize: '11px', fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '8px' }}>
+            Yield Markets
           </div>
-          {/* Live sync badge */}
-          {mounted && isReady && (
-            <button
-              onClick={refreshMarketplace}
-              disabled={isFetching}
-              className="ml-auto flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-xs text-slate-400 transition-all hover:border-emerald-500/40 hover:text-emerald-400 disabled:opacity-50"
-            >
-              <span className={`h-1.5 w-1.5 rounded-full ${isFetching ? 'bg-yellow-400 animate-pulse' : 'bg-emerald-400'}`} />
-              {isFetching ? 'Syncing…' : 'Live Devnet'}
-            </button>
-          )}
+          <h1 style={{ fontSize: '28px', fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--text-primary)', lineHeight: 1 }}>
+            Investor Marketplace
+          </h1>
+          <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginTop: '8px' }}>
+            Fund verified agricultural yield pools and earn transparent on-chain returns.
+          </p>
         </div>
-        {mounted && !connected && (
-          <div className="mt-4 flex items-center gap-3 rounded-xl border border-yellow-500/30 bg-yellow-500/5 px-4 py-3 text-sm text-yellow-400">
-            <span>⚠️</span>
-            <span>Connect your wallet to fund yield pools on-chain.</span>
-          </div>
+        {mounted && isReady && (
+          <button
+            onClick={refreshMarketplace}
+            disabled={isFetching}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', borderRadius: '999px', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', fontSize: '12px', fontWeight: 500, cursor: 'pointer', transition: 'all 0.2s', opacity: isFetching ? 0.6 : 1, fontFamily: 'var(--font-mono)' }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--border-hover)'; e.currentTarget.style.color = 'var(--text-primary)'; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+          >
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: isFetching ? '#f59e0b' : 'var(--accent)', animation: isFetching ? 'blink 1s infinite' : 'none' }} />
+            {isFetching ? 'Syncing…' : 'Live Devnet'}
+          </button>
         )}
       </div>
 
-      <div className="grid gap-8 lg:grid-cols-5">
-        {/* ── Pool listing — 3/5 ──────────────────────────────────────── */}
-        <section className="lg:col-span-3">
+      {mounted && !connected && (
+        <div style={{ marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 16px', borderRadius: '10px', border: '1px solid rgba(245,158,11,0.2)', background: 'rgba(245,158,11,0.06)', fontSize: '13px', color: '#f59e0b' }}>
+          <span>◬</span> Connect your wallet to fund yield pools on-chain.
+        </div>
+      )}
 
-          <div className="mb-5 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <h2 className="font-bold text-white">Open Yield Pools</h2>
+      <div className="responsive-layout-grid">
+
+        {/* ── LEFT: Pool listing ── */}
+        <section>
+          {/* Filters + count */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <h2 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)' }}>Open Yield Pools</h2>
               {livePools.length > 0 && (
-                <span className="rounded-full bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 text-xs text-emerald-400">
+                <span style={{ padding: '2px 10px', borderRadius: '999px', border: '1px solid var(--border)', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
                   {livePools.length} on-chain
                 </span>
               )}
             </div>
-            <div className="flex gap-1.5">
+            <div style={{ display: 'flex', gap: '6px' }}>
               {FILTERS.map(f => (
-                <button key={f} onClick={() => setActiveFilter(f)}
-                  className={`rounded-full px-3 py-1 text-xs font-semibold transition-all ${
-                    activeFilter === f
-                      ? 'bg-emerald-600 text-white shadow shadow-emerald-900/40'
-                      : 'bg-slate-800 text-slate-400 border border-slate-700 hover:border-emerald-500/40 hover:text-emerald-400'
-                  }`}>{f}</button>
+                <button key={f} onClick={() => setActiveFilter(f)} style={{
+                  padding: '5px 14px', borderRadius: '999px', fontSize: '12px', fontWeight: 500, cursor: 'pointer', border: '1px solid', transition: 'all 0.2s',
+                  ...(activeFilter === f
+                    ? { background: 'var(--accent)', color: '#000', borderColor: 'var(--accent)' }
+                    : { background: 'transparent', color: 'var(--text-secondary)', borderColor: 'var(--border)' }
+                  ),
+                }}
+                  onMouseEnter={e => { if (activeFilter !== f) { e.currentTarget.style.borderColor = 'var(--border-hover)'; e.currentTarget.style.color = 'var(--text-primary)'; } }}
+                  onMouseLeave={e => { if (activeFilter !== f) { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; } }}
+                >{f}</button>
               ))}
             </div>
           </div>
 
           {/* Pool cards */}
-          <div className="flex flex-col gap-3">
-            {/* Empty states */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {!isReady && (
-              <div className="rounded-2xl border border-slate-700/40 bg-slate-800/30 p-10 text-center text-sm text-slate-500">
+              <div style={{ padding: '48px 24px', textAlign: 'center', borderRadius: 'var(--card-radius)', border: '1px solid var(--border)', color: 'var(--text-muted)', fontSize: '14px' }}>
                 Connect your wallet to load live yield pools.
               </div>
             )}
             {isReady && livePools.length === 0 && !isFetching && (
-              <div className="rounded-2xl border border-slate-700/40 bg-slate-800/30 p-10 text-center">
-                <p className="text-sm text-slate-400 mb-1">No initialized pools on-chain yet.</p>
-                <p className="text-xs text-slate-600">Visit the <span className="text-emerald-500">Estate Portal</span> to initialize a yield pool first.</p>
+              <div style={{ padding: '48px 24px', textAlign: 'center', borderRadius: 'var(--card-radius)', border: '1px solid var(--border)' }}>
+                <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginBottom: '4px' }}>No initialized pools on-chain yet.</p>
+                <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Visit the <span style={{ color: 'var(--accent)' }}>Estate Portal</span> to initialize a yield pool first.</p>
               </div>
             )}
             {isReady && livePools.length > 0 && filteredMerged.length === 0 && (
-              <div className="rounded-2xl border border-slate-700/40 bg-slate-800/30 p-10 text-center text-sm text-slate-500">
-                No initialized pools in <span className="text-emerald-400">{activeFilter}</span>.
+              <div style={{ padding: '48px 24px', textAlign: 'center', borderRadius: 'var(--card-radius)', border: '1px solid var(--border)', fontSize: '14px', color: 'var(--text-muted)' }}>
+                No pools in <span style={{ color: 'var(--accent)' }}>{activeFilter}</span>.
               </div>
             )}
 
-            {filteredMerged.map(({ meta, livePool }, displayIdx) => {
-              // Pull live on-chain numbers when available, else show skeleton zeros
-              const goalMicro    = livePool ? deriveGoal(livePool) : 0;
-              const fundedMicro  = livePool ? livePool.account.totalFundedUsdc.toNumber() : 0;
-              const percentage   = pct(fundedMicro, goalMicro);
+            {filteredMerged.map(({ meta, livePool }) => {
+              const goalMicro   = livePool ? deriveGoal(livePool) : 0;
+              const fundedMicro = livePool ? livePool.account.totalFundedUsdc.toNumber() : 0;
+              const percentage  = pct(fundedMicro, goalMicro);
               const remainingUsd = toUsdc(Math.max(goalMicro - fundedMicro, 0));
-              const goalUsd      = toUsdc(goalMicro);
-              const fundedUsd    = toUsdc(fundedMicro);
-              const isActive     = livePool?.account.isActive ?? true;
-              const isSelected   = selectedPool?.publicKey.toBase58() === livePool?.publicKey.toBase58();
+              const goalUsd     = toUsdc(goalMicro);
+              const fundedUsd   = toUsdc(fundedMicro);
+              const isSelected  = selectedPool?.publicKey.toBase58() === livePool?.publicKey.toBase58();
 
               return (
-                <div key={livePool ? livePool.publicKey.toBase58() : meta.crop}
-                  onClick={() => {
-                    const idx = livePools.findIndex(p => p.publicKey.toBase58() === livePool.publicKey.toBase58());
-                    if (idx !== -1) setSelectedIdx(idx);
+                <div
+                  key={livePool ? livePool.publicKey.toBase58() : meta.crop}
+                  onClick={() => { const idx = livePools.findIndex(p => p.publicKey.toBase58() === livePool.publicKey.toBase58()); if (idx !== -1) setSelectedIdx(idx); }}
+                  style={{
+                    padding: '20px 22px', borderRadius: 'var(--card-radius)', border: `1px solid ${isSelected ? 'rgba(34,197,94,0.3)' : 'var(--border)'}`,
+                    background: isSelected ? 'rgba(34,197,94,0.04)' : 'var(--bg-card)', cursor: 'pointer', transition: 'all 0.2s',
                   }}
-                  className={`group cursor-pointer rounded-2xl border p-5 backdrop-blur-sm transition-all duration-200 ${
-                    isSelected
-                      ? 'border-emerald-500/40 bg-emerald-500/5 shadow-lg shadow-emerald-900/10'
-                      : 'border-slate-700/60 bg-slate-800/40 hover:border-emerald-500/20 hover:bg-slate-800/60'
-                  }`}>
-                  <div className="flex items-start gap-4">
-                    <span className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-xl bg-slate-700/80 text-2xl">
-                      {meta.avatar}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-3 mb-1">
-                        <div className="min-w-0 flex-1">
-                          <p
-                            className="font-semibold text-white line-clamp-2 break-words"
-                            title={livePool ? livePool.account.estateName : meta.farmer}
-                          >
+                  onMouseEnter={e => { if (!isSelected) e.currentTarget.style.borderColor = 'var(--border-hover)'; }}
+                  onMouseLeave={e => { if (!isSelected) e.currentTarget.style.borderColor = 'var(--border)'; }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', marginBottom: '12px' }}>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <p style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: '3px' }} title={livePool?.account.estateName}>
                             {livePool ? livePool.account.estateName : meta.farmer}
                           </p>
-                          <p className="text-sm text-slate-400">{meta.crop} · {meta.region}</p>
+                          <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                            {meta.crop} · <span style={{ color: 'var(--text-muted)' }}>{meta.region}</span>
+                          </p>
                         </div>
-                        <div className="text-right flex-shrink-0">
-                          <p className="text-lg font-extrabold text-emerald-400">{meta.apr}</p>
-                          <p className="text-xs text-slate-500">Est. APR</p>
+                        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                          <p style={{ fontSize: '20px', fontWeight: 700, color: 'var(--accent)', fontFamily: 'var(--font-mono)', lineHeight: 1 }}>{meta.apr}</p>
+                          <p style={{ fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '0.05em', textTransform: 'uppercase', marginTop: '2px' }}>Est. APR</p>
                         </div>
                       </div>
 
-                      {/* On-chain metrics */}
-                      <div className="grid grid-cols-3 gap-2 mt-3 mb-3">
-                        <div className="rounded-lg bg-slate-700/40 px-2.5 py-2 text-center">
-                          <p className="text-xs text-slate-500">Funded</p>
-                          <p className="text-xs font-semibold text-white">
-                            {livePool
-                              ? `$${fundedUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
-                              : <span className="text-slate-600">—</span>}
-                          </p>
-                        </div>
-                        <div className="rounded-lg bg-slate-700/40 px-2.5 py-2 text-center">
-                          <p className="text-xs text-slate-500">Goal</p>
-                          <p className="text-xs font-semibold text-emerald-400">
-                            {livePool
-                              ? `$${goalUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
-                              : <span className="text-slate-600">—</span>}
-                          </p>
-                        </div>
-                        <div className="rounded-lg bg-slate-700/40 px-2.5 py-2 text-center">
-                          <p className="text-xs text-slate-500">Remaining</p>
-                          <p className="text-xs font-semibold text-teal-400">
-                            {livePool
-                              ? `$${remainingUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
-                              : <span className="text-slate-600">—</span>}
-                          </p>
-                        </div>
+                      {/* Metrics row */}
+                      <div className="responsive-grid-3-cols" style={{ marginBottom: '12px' }}>
+                        {[
+                          { label: 'Funded', value: livePool ? `$${fundedUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '—', color: 'var(--text-primary)' },
+                          { label: 'Goal', value: livePool ? `$${goalUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '—', color: 'var(--accent)' },
+                          { label: 'Remaining', value: livePool ? `$${remainingUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '—', color: 'var(--text-secondary)' },
+                        ].map(m => (
+                          <div key={m.label} style={{ padding: '8px 10px', borderRadius: '8px', background: 'var(--bg-surface)', border: '1px solid var(--border)', textAlign: 'center' }}>
+                            <p style={{ fontSize: '10px', color: 'var(--text-muted)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: '2px' }}>{m.label}</p>
+                            <p style={{ fontSize: '13px', fontWeight: 600, color: m.color, fontFamily: 'var(--font-mono)' }}>{m.value}</p>
+                          </div>
+                        ))}
                       </div>
 
-                      {/* Live progress bar */}
-                      {livePool ? (
-                        <ProgressBar funded={fundedMicro} goal={goalMicro} />
-                      ) : (
-                        <div className="h-1.5 rounded-full bg-slate-700 overflow-hidden">
-                          <div className="h-full w-0 rounded-full bg-gradient-to-r from-emerald-500 to-teal-400" />
-                        </div>
+                      {/* Progress bar */}
+                      {livePool && (
+                        <>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '5px' }}>
+                            <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>${toUsdc(fundedMicro).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                            <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{percentage.toFixed(1)}%</span>
+                          </div>
+                          <div style={{ height: '4px', borderRadius: '2px', background: 'var(--border)', overflow: 'hidden' }}>
+                            <div style={{ height: '100%', width: `${percentage}%`, background: 'var(--accent)', borderRadius: '2px', transition: 'width 0.5s' }} />
+                          </div>
+                        </>
                       )}
 
-                      {/* Status + compliance badges */}
-                      <div className="mt-3 flex flex-wrap gap-1.5">
-                        {livePool && (() => {
-                          const { label, style } = getStatusLabelAndColor(livePool.account.status);
-                          return (
-                            <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${style}`}>
-                              {label}
-                            </span>
-                          );
-                        })()}
+                      {/* Tags row */}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginTop: '10px' }}>
+                        {livePool && <StatusPill status={livePool.account.status} />}
                         {['KYC Verified', 'Insurance Active', 'USDC Settlement', 'Audited'].map(tag => (
-                          <span key={tag}
-                            className="rounded-full bg-slate-700/60 border border-slate-600/40 px-2 py-0.5 text-[10px] font-medium text-slate-400">
+                          <span key={tag} style={{ padding: '2px 8px', borderRadius: '999px', border: '1px solid var(--border)', fontSize: '10px', color: 'var(--text-muted)', fontWeight: 500 }}>
                             ✓ {tag}
                           </span>
                         ))}
@@ -779,300 +434,217 @@ export default function InvestorPage() {
           </div>
         </section>
 
-        {/* ── RIGHT: Invest panel — 2/5 ──────────────────────────────── */}
-        <section className="lg:col-span-2 flex flex-col gap-5">
+        {/* ── RIGHT: Invest panel ── */}
+        <section style={{ display: 'flex', flexDirection: 'column', gap: '14px', position: 'sticky', top: '80px' }}>
 
-          {/* Investment widget */}
-          <div className="rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-emerald-900/25 via-slate-800/60 to-teal-900/15 p-5 backdrop-blur-sm">
-            <h2 className="font-bold text-white mb-1">Invest in Pool</h2>
-            <p className="text-xs text-slate-400 mb-5">Provide USDC funding to the selected yield pool</p>
+          {/* Invest card */}
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--card-radius)', padding: '24px 22px' }}>
+            <div style={{ fontSize: '11px', fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--accent)', marginBottom: '8px' }}>
+              Invest in Pool
+            </div>
+            <h2 style={{ fontSize: '18px', fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--text-primary)', marginBottom: '18px' }}>
+              {selectedItem.meta.crop || 'Select a Pool'}
+            </h2>
 
-            <div className="space-y-4">
-              {/* Pool selector — driven by live on-chain accounts */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {/* Pool selector */}
               <div>
-                <label className="text-xs text-slate-500 mb-1.5 block">Selected Pool</label>
+                <label style={{ fontSize: '11px', fontWeight: 500, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '6px', display: 'block' }}>Selected Pool</label>
                 {livePools.length > 0 ? (
                   <select
                     id="investor-pool-select"
                     value={selectedPoolKey}
-                    onChange={e => {
-                      const key = e.target.value;
-                      setSelectedPoolKey(key);
-                      const idx = livePools.findIndex(p => p.publicKey.toBase58() === key);
-                      if (idx !== -1) setSelectedIdx(idx);
-                    }}
-                    className="w-full rounded-xl border border-slate-700 bg-slate-800 px-3 py-2.5 text-sm text-white focus:border-emerald-500 focus:outline-none"
+                    onChange={e => { const key = e.target.value; setSelectedPoolKey(key); const idx = livePools.findIndex(p => p.publicKey.toBase58() === key); if (idx !== -1) setSelectedIdx(idx); }}
+                    style={{ width: '100%', padding: '10px 12px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg-surface)', color: 'var(--text-primary)', fontSize: '13px', outline: 'none', cursor: 'pointer', fontFamily: 'inherit' }}
+                    onFocus={e => (e.target.style.borderColor = 'var(--accent)')}
+                    onBlur={e => (e.target.style.borderColor = 'var(--border)')}
                   >
-                    {livePools.map((pool, i) => {
-                      const meta = getPoolMeta(pool);
-                      const key  = pool.publicKey.toBase58();
-                      return (
-                        <option key={key} value={key}>
-                          {meta.avatar} {meta.crop} · {key.slice(0, 6)}…{key.slice(-4)}
-                        </option>
-                      );
-                    })}
+                    {livePools.map(pool => { const meta = getPoolMeta(pool); const key = pool.publicKey.toBase58(); return (<option key={key} value={key}>{meta.crop} · {key.slice(0, 6)}…{key.slice(-4)}</option>); })}
                   </select>
                 ) : (
-                  <div className="w-full rounded-xl border border-slate-700/50 bg-slate-800/40 px-3 py-2.5 text-sm text-slate-500 italic">
-                    {isReady ? 'No pools found on-chain yet…' : 'Connect wallet to load pools'}
+                  <div style={{ padding: '10px 12px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg-surface)', fontSize: '13px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                    {isReady ? 'No pools found on-chain…' : 'Connect wallet to load pools'}
                   </div>
                 )}
               </div>
 
-              {/* Verified pool address — read-only display, not editable */}
+              {/* Pool address display */}
               <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs text-slate-500">Verified Pool Address</label>
-                  <span className="rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[10px] font-medium text-emerald-400">
-                    ✓ Auto-resolved
-                  </span>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <label style={{ fontSize: '11px', fontWeight: 500, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Pool Address</label>
+                  <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '999px', background: 'var(--accent-dim)', color: 'var(--accent)', border: '1px solid rgba(34,197,94,0.2)' }}>✓ Auto-resolved</span>
                 </div>
-                <div
-                  id="pool-address-display"
-                  aria-readonly="true"
-                  className="w-full rounded-xl border border-slate-700/60 bg-slate-950 px-3 py-2.5 font-mono text-[11px] text-slate-400 select-all cursor-text break-all leading-relaxed"
-                >
-                  {selectedPoolKey || <span className="text-slate-600 italic">Waiting for on-chain data…</span>}
+                <div style={{ padding: '10px 12px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg-base)', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-secondary)', wordBreak: 'break-all', lineHeight: 1.5, cursor: 'text', userSelect: 'all' }}>
+                  {selectedPoolKey || <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Waiting for on-chain data…</span>}
                 </div>
-                <p className="mt-1 text-xs text-slate-600">Auto-populated from the selected live pool · click to copy</p>
               </div>
 
-              {/* Asset Risk Profile — always shown for selected pool */}
+              {/* Asset risk profile */}
               <AssetRiskProfile
-                pool={selectedItem.livePool ?? {
-                  publicKey: new PublicKey('11111111111111111111111111111111'),
-                  account: {
-                    authority: new PublicKey('11111111111111111111111111111111'),
-                    totalYieldKg: { toNumber: () => 0 } as any,
-                    pricePerKg:   { toNumber: () => 0 } as any,
-                    totalFundedUsdc: { toNumber: () => 0 } as any,
-                    isActive: true,
-                  },
-                }}
+                pool={selectedItem.livePool ?? { publicKey: new PublicKey('11111111111111111111111111111111'), account: { authority: new PublicKey('11111111111111111111111111111111'), totalYieldKg: { toNumber: () => 0 } as any, pricePerKg: { toNumber: () => 0 } as any, totalFundedUsdc: { toNumber: () => 0 } as any, isActive: true } }}
                 meta={selectedItem.meta}
               />
 
-              {/* Tab Switcher */}
+              {/* Tab switcher (deposit/refund) */}
               {isPoolOpen && receiptBalance > 0 && (
-                <div className="flex gap-2 p-1 rounded-xl bg-slate-900/60 border border-slate-700/50">
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('deposit')}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-semibold transition-all ${
-                      activeTab === 'deposit'
-                        ? 'bg-emerald-600/90 text-white shadow-sm'
-                        : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
-                    }`}
-                  >
-                    ⚡ Deposit
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('refund')}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-semibold transition-all ${
-                      activeTab === 'refund'
-                        ? 'bg-red-600/90 text-white shadow-sm'
-                        : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
-                    }`}
-                  >
-                    ↩️ Withdraw
-                  </button>
+                <div style={{ display: 'flex', gap: '6px', padding: '4px', borderRadius: '12px', background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+                  {(['deposit', 'refund'] as const).map(tab => (
+                    <button key={tab} type="button" onClick={() => setActiveTab(tab)} style={{
+                      flex: 1, padding: '8px', borderRadius: '8px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', border: 'none', transition: 'all 0.2s',
+                      ...(activeTab === tab
+                        ? { background: tab === 'deposit' ? 'var(--accent)' : 'var(--danger)', color: tab === 'deposit' ? '#000' : '#fff' }
+                        : { background: 'transparent', color: 'var(--text-secondary)' }
+                      ),
+                    }}>
+                      {tab === 'deposit' ? 'Deposit' : 'Withdraw'}
+                    </button>
+                  ))}
                 </div>
               )}
 
-              {activeTab === 'deposit' || !isPoolOpen || receiptBalance === 0 ? (
+              {/* Deposit tab */}
+              {(activeTab === 'deposit' || !isPoolOpen || receiptBalance === 0) ? (
                 <>
-                  {/* Amount */}
+                  {isClaimable && isDefaulted && (
+                    <div style={{ padding: '10px 14px', borderRadius: '10px', border: '1px solid rgba(239,68,68,0.2)', background: 'rgba(239,68,68,0.06)', fontSize: '12px', color: 'var(--danger)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>◬</span> POOL DEFAULTED: Parametric Insurance Claim Unlocked
+                    </div>
+                  )}
+                  {/* Amount input */}
                   <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <label className="text-xs text-slate-500">Amount (USDC)</label>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                      <label style={{ fontSize: '11px', fontWeight: 500, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Amount (USDC)</label>
                       {selectedItem.livePool && (() => {
-                        const goalMicro   = selectedItem.livePool.account.totalYieldKg.toNumber() *
-                                            selectedItem.livePool.account.pricePerKg.toNumber();
-                        const fundedMicro = selectedItem.livePool.account.totalFundedUsdc.toNumber();
-                        const maxUsd      = Math.max((goalMicro - fundedMicro) / 1_000_000, 0);
-                        return (
-                          <span className="text-[10px] text-slate-500">
-                            max&nbsp;<span className="font-semibold text-teal-400">
-                              ${maxUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                            </span>&nbsp;remaining
-                          </span>
-                        );
+                        const maxUsd = Math.max((deriveGoal(selectedItem.livePool) - selectedItem.livePool.account.totalFundedUsdc.toNumber()) / 1_000_000, 0);
+                        return <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>max <span style={{ color: 'var(--accent)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>${maxUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span></span>;
                       })()}
                     </div>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
+                    <div style={{ position: 'relative' }}>
+                      <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)', fontSize: '14px' }}>$</span>
                       <input
                         id="invest-amount"
-                        type="number"
-                        min={0.01}
-                        step={0.01}
+                        type="number" min={0.01} step={0.01}
                         disabled={!isPoolOpen}
-                        max={selectedItem.livePool
-                          ? Math.max(
-                              (selectedItem.livePool.account.totalYieldKg.toNumber() *
-                               selectedItem.livePool.account.pricePerKg.toNumber() -
-                               selectedItem.livePool.account.totalFundedUsdc.toNumber()) / 1_000_000,
-                               0
-                            )
-                          : undefined
-                        }
                         value={investAmount}
                         onChange={e => setInvestAmount(e.target.value)}
-                        placeholder={isPoolOpen ? "0.00" : "N/A - Closed"}
-                        className="w-full rounded-xl border border-slate-700 bg-slate-800 py-2.5 pl-7 pr-4 text-sm text-white placeholder-slate-600 focus:border-emerald-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed"
+                        placeholder={isPoolOpen ? '0.00' : 'Closed'}
+                        style={{ width: '100%', padding: '10px 12px 10px 26px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg-surface)', color: 'var(--text-primary)', fontSize: '14px', fontFamily: 'var(--font-mono)', outline: 'none', transition: 'border-color 0.2s' }}
+                        onFocus={e => (e.target.style.borderColor = 'var(--accent)')}
+                        onBlur={e => (e.target.style.borderColor = 'var(--border)')}
                       />
                     </div>
                   </div>
 
-                  {/* Presets */}
+                  {/* Preset amounts */}
                   {selectedItem.livePool?.account.status.open !== undefined && (
-                    <div className="grid grid-cols-4 gap-2">
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '6px' }}>
                       {PRESET_AMOUNTS.map(amt => (
-                        <button key={amt} id={`preset-${amt}`}
-                          onClick={() => setInvestAmount(String(amt))}
-                          disabled={!isPoolOpen}
-                          className="rounded-lg border border-slate-700 bg-slate-800/60 py-1.5 text-xs font-medium text-slate-400 transition-all hover:border-emerald-500/40 hover:text-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed">
+                        <button key={amt} id={`preset-${amt}`} onClick={() => setInvestAmount(String(amt))} disabled={!isPoolOpen}
+                          style={{ padding: '7px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-surface)', color: 'var(--text-secondary)', fontSize: '12px', fontWeight: 500, cursor: 'pointer', transition: 'all 0.2s', fontFamily: 'var(--font-mono)' }}
+                          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.color = 'var(--accent)'; }}
+                          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+                        >
                           ${amt >= 1_000 ? `${amt / 1_000}k` : amt}
                         </button>
                       ))}
                     </div>
                   )}
 
-                  {/* Submit */}
-                  {isClaimable && isDefaulted && (
-                    <div className="relative w-full mt-4 mb-4 p-3 rounded-xl border border-red-500/30 bg-red-500/10 text-xs text-red-400 font-semibold flex items-center gap-2">
-                      <span>⚠️</span>
-                      <span>POOL DEFAULTED: Parametric Insurance Claim Unlocked</span>
-                    </div>
-                  )}
+                  {/* CTA */}
                   {isClaimable ? (
-                    <button
-                      id="claim-yield-submit"
-                      onClick={handleClaim}
-                      disabled={!isReady || isClaiming || !selectedPoolKey}
-                      className="mt-5 w-full rounded-xl bg-gradient-to-r from-teal-600 to-emerald-500 py-3.5 text-sm font-bold text-white shadow-lg shadow-teal-900/40 transition-all hover:from-teal-500 hover:to-emerald-400 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed">
-                      {isClaiming ? '⏳ Claiming Yield…' : '🎁 Claim Yield USDC'}
+                    <button id="claim-yield-submit" onClick={handleClaim} disabled={!isReady || isClaiming || !selectedPoolKey}
+                      style={{ width: '100%', padding: '14px', borderRadius: '999px', background: 'var(--accent)', color: '#000', fontWeight: 700, fontSize: '14px', border: 'none', cursor: 'pointer', transition: 'opacity 0.2s', opacity: (!isReady || isClaiming || !selectedPoolKey) ? 0.4 : 1 }}>
+                      {isClaiming ? 'Claiming Yield…' : 'Claim Yield USDC'}
                     </button>
                   ) : (
-                    <button
-                      id="fund-submit"
-                      onClick={handleFund}
-                      disabled={!isReady || isFunding || !selectedPoolKey || (connected && (!isPoolOpen || !investAmount))}
-                      className="mt-5 w-full rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 py-3.5 text-sm font-bold text-white shadow-lg shadow-emerald-900/40 transition-all hover:from-emerald-500 hover:to-teal-400 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed">
-                      {isFunding         ? '⏳ Sending Transaction…'
-                        : !connected    ? '🔌 Connect Wallet to Invest'
-                        : !selectedPoolKey ? '⏳ Loading pool address…'
-                        : !isPoolOpen      ? 'Closed - Farming in Progress'
-                        : '⚡ Fund Pool'}
+                    <button id="fund-submit" onClick={handleFund} disabled={!isReady || isFunding || !selectedPoolKey || (connected && (!isPoolOpen || !investAmount))}
+                      style={{ width: '100%', padding: '14px', borderRadius: '999px', background: isPoolOpen ? 'var(--accent)' : 'var(--bg-surface)', color: isPoolOpen ? '#000' : 'var(--text-muted)', fontWeight: 700, fontSize: '14px', border: isPoolOpen ? 'none' : '1px solid var(--border)', cursor: isPoolOpen ? 'pointer' : 'not-allowed', transition: 'opacity 0.2s', opacity: (!isReady || isFunding || !selectedPoolKey || (connected && (!isPoolOpen || !investAmount))) ? 0.4 : 1 }}>
+                      {isFunding ? 'Sending Transaction…' : !connected ? 'Connect Wallet to Invest' : !selectedPoolKey ? 'Loading pool…' : !isPoolOpen ? 'Farming in Progress' : 'Fund Pool'}
                     </button>
                   )}
                 </>
               ) : (
                 <>
-                  {/* Refund Amount */}
+                  {/* Refund tab */}
                   <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <label className="text-xs text-slate-500">Withdraw Amount (USDC)</label>
-                      <span className="text-[10px] text-slate-500">
-                        Max withdrawable:&nbsp;
-                        <span className="font-semibold text-rose-400">
-                          ${receiptBalance.toFixed(2)}
-                        </span>
-                      </span>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                      <label style={{ fontSize: '11px', fontWeight: 500, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Withdraw Amount (USDC)</label>
+                      <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Max: <span style={{ color: 'var(--danger)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>${receiptBalance.toFixed(2)}</span></span>
                     </div>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
-                      <input
-                        id="refund-amount-input"
-                        type="number"
-                        min={0.01}
-                        step={0.01}
-                        max={receiptBalance}
-                        value={refundAmount}
-                        onChange={e => setRefundAmount(e.target.value)}
-                        placeholder="0.00"
-                        className="w-full rounded-xl border border-slate-700 bg-slate-800 py-2.5 pl-7 pr-16 text-sm text-white placeholder-slate-600 focus:border-red-500 focus:outline-none"
+                    <div style={{ position: 'relative' }}>
+                      <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-secondary)', fontSize: '14px' }}>$</span>
+                      <input id="refund-amount-input" type="number" min={0.01} step={0.01} max={receiptBalance} value={refundAmount} onChange={e => setRefundAmount(e.target.value)} placeholder="0.00"
+                        style={{ width: '100%', padding: '10px 56px 10px 26px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg-surface)', color: 'var(--text-primary)', fontSize: '14px', fontFamily: 'var(--font-mono)', outline: 'none', transition: 'border-color 0.2s' }}
+                        onFocus={e => (e.target.style.borderColor = 'var(--danger)')}
+                        onBlur={e => (e.target.style.borderColor = 'var(--border)')}
                       />
-                      <button
-                        type="button"
-                        onClick={() => setRefundAmount(String(receiptBalance))}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg bg-red-500/10 border border-red-500/30 px-2 py-1 text-[10px] font-bold text-red-400 hover:bg-red-500/20 transition-all"
-                      >
+                      <button type="button" onClick={() => setRefundAmount(String(receiptBalance))}
+                        style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', padding: '4px 8px', borderRadius: '6px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', color: 'var(--danger)', fontSize: '10px', fontWeight: 700, cursor: 'pointer' }}>
                         MAX
                       </button>
                     </div>
                   </div>
-
-                  <button
-                    id="refund-submit"
-                    onClick={handleRefund}
-                    disabled={!isReady || isRefunding || !selectedPoolKey || !refundAmount || parseFloat(refundAmount) <= 0 || parseFloat(refundAmount) > receiptBalance}
-                    className="mt-5 w-full rounded-xl bg-gradient-to-r from-red-600 to-rose-500 py-3.5 text-sm font-bold text-white shadow-lg shadow-red-900/40 transition-all hover:from-red-500 hover:to-rose-400 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed">
-                    {isRefunding ? '⏳ Withdrawing…' : 'Withdraw'}
+                  <button id="refund-submit" onClick={handleRefund} disabled={!isReady || isRefunding || !selectedPoolKey || !refundAmount || parseFloat(refundAmount) <= 0 || parseFloat(refundAmount) > receiptBalance}
+                    style={{ width: '100%', padding: '14px', borderRadius: '999px', background: 'rgba(239,68,68,0.15)', color: 'var(--danger)', fontWeight: 700, fontSize: '14px', border: '1px solid rgba(239,68,68,0.2)', cursor: 'pointer', transition: 'all 0.2s', opacity: (!isReady || isRefunding || !selectedPoolKey || !refundAmount || parseFloat(refundAmount) <= 0 || parseFloat(refundAmount) > receiptBalance) ? 0.4 : 1 }}>
+                    {isRefunding ? 'Withdrawing…' : 'Withdraw USDC'}
                   </button>
                 </>
               )}
-            </div>
 
-            <p className="mt-3 text-center text-xs text-slate-600">
-              Transactions settle on Solana Devnet · ~400ms finality
-            </p>
+              <p style={{ textAlign: 'center', fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                Solana Devnet · ~400ms finality
+              </p>
+            </div>
           </div>
 
           {/* Market ranking */}
-          <div className="rounded-2xl border border-slate-700/60 bg-slate-800/40 p-5 backdrop-blur-sm">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-bold text-white">Market Ranking</h2>
-              <span className="rounded-full bg-slate-700/60 px-2.5 py-1 text-xs text-slate-400">
-                {filteredMerged.length} pools
-              </span>
-            </div>
-            <div className="flex flex-col gap-2">
-               {mergedPools.map(({ meta, livePool }, i) => {
-                const goalMicro   = deriveGoal(livePool);
-                const fundedMicro = livePool.account.totalFundedUsdc.toNumber();
-                const percentage  = pct(fundedMicro, goalMicro);
-                const isSelected  = selectedPool?.publicKey.toBase58() === livePool?.publicKey.toBase58();
-
-                return (
-                  <div key={livePool.publicKey.toBase58()} onClick={() => setSelectedIdx(i)}
-                    className={`flex items-center gap-3 rounded-xl border px-3.5 py-3 cursor-pointer transition-all ${
-                      isSelected
-                        ? 'border-emerald-500/40 bg-emerald-500/5'
-                        : 'border-slate-700/40 hover:border-emerald-500/20'
-                    }`}>
-                    <span className="w-5 text-center text-sm font-bold text-slate-600">{i + 1}</span>
-                    <span className="text-lg">{meta.avatar}</span>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-semibold text-white truncate">{meta.crop}</p>
-                      {/* Mini progress bar */}
-                      <div className="mt-1 h-1 rounded-full bg-slate-700 overflow-hidden">
-                        <div
-                          className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-700"
-                          style={{ width: `${percentage}%` }}
-                        />
+          {mergedPools.length > 0 && (
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--card-radius)', padding: '20px 22px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                <div style={{ fontSize: '11px', fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Market Ranking</div>
+                <span style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>{filteredMerged.length} pools</span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {mergedPools.map(({ meta, livePool }, i) => {
+                  const goalMicro   = deriveGoal(livePool);
+                  const fundedMicro = livePool.account.totalFundedUsdc.toNumber();
+                  const percentage  = pct(fundedMicro, goalMicro);
+                  const isSelected  = selectedPool?.publicKey.toBase58() === livePool?.publicKey.toBase58();
+                  return (
+                    <div key={livePool.publicKey.toBase58()} onClick={() => setSelectedIdx(i)}
+                      style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', borderRadius: '10px', border: `1px solid ${isSelected ? 'rgba(34,197,94,0.3)' : 'var(--border)'}`, background: isSelected ? 'rgba(34,197,94,0.04)' : 'var(--bg-surface)', cursor: 'pointer', transition: 'all 0.2s' }}
+                      onMouseEnter={e => { if (!isSelected) e.currentTarget.style.borderColor = 'var(--border-hover)'; }}
+                      onMouseLeave={e => { if (!isSelected) e.currentTarget.style.borderColor = 'var(--border)'; }}
+                    >
+                      <span style={{ width: 20, textAlign: 'center', fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', flexShrink: 0 }}>{i + 1}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: '4px' }}>{meta.crop}</p>
+                        <div style={{ height: '3px', borderRadius: '2px', background: 'var(--border)', overflow: 'hidden' }}>
+                          <div style={{ height: '100%', width: `${percentage}%`, background: 'var(--accent)', borderRadius: '2px', transition: 'width 0.5s' }} />
+                        </div>
+                      </div>
+                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                        <p style={{ fontSize: '13px', fontWeight: 700, color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>{meta.apr}</p>
+                        <p style={{ fontSize: '10px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{percentage.toFixed(0)}%</p>
                       </div>
                     </div>
-                    <div className="text-right">
-                      <p className="text-sm font-bold text-emerald-400">{meta.apr}</p>
-                      <p className="text-[10px] text-slate-500">{percentage.toFixed(0)}% filled</p>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Transaction log */}
           {txLogs.length > 0 && (
-            <div className="rounded-2xl border border-slate-700/60 bg-slate-800/40 p-5 backdrop-blur-sm">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-bold text-white">Transaction Log</h3>
-                <button onClick={() => setTxLogs([])} className="text-xs text-slate-500 hover:text-slate-300">Clear</button>
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--card-radius)', padding: '20px 22px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                <div style={{ fontSize: '11px', fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Transaction Log</div>
+                <button onClick={() => setTxLogs([])} style={{ fontSize: '11px', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', transition: 'color 0.2s' }}
+                  onMouseEnter={e => (e.currentTarget.style.color = 'var(--text-secondary)')}
+                  onMouseLeave={e => (e.currentTarget.style.color = 'var(--text-muted)')}
+                >Clear</button>
               </div>
-              <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '280px', overflowY: 'auto' }}>
                 {txLogs.map(log => <TxBadge key={log.id} log={log} />)}
               </div>
             </div>

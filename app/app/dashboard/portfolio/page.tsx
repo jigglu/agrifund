@@ -5,67 +5,38 @@ import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import { PublicKey } from '@solana/web3.js';
 import { useAgriFund, type OnChainPool } from '@/hooks/useAgriFund';
 import Link from 'next/link';
+import React from 'react';
 
 interface PoolMeta {
   farmer: string;
   crop: string;
   region: string;
-  avatar: string;
-  apr: string;
   category: string;
+  apr: string;
 }
 
 const getPoolMeta = (pool: OnChainPool | null): PoolMeta => {
-  if (!pool) return {
-    farmer: 'Unknown Farmer',
-    crop: 'Unknown Crop',
-    region: 'Unknown Region',
-    avatar: '🌱',
-    apr: '0.0%',
-    category: 'Other'
-  };
-  const apr = pool.account.apr ? `${(pool.account.apr / 100).toFixed(1)}%` : '0.0%';
-  const category = pool.account.category || 'Other';
-  
-  const cropLower = pool.account.cropName?.toLowerCase() || '';
-  const categoryLower = category.toLowerCase();
-  let avatar = '🌱';
-  if (categoryLower.includes('coffee') || cropLower.includes('coffee')) {
-    avatar = '☕';
-  } else if (categoryLower.includes('grain') || cropLower.includes('rice') || cropLower.includes('wheat') || cropLower.includes('grain')) {
-    avatar = '🌾';
-  } else if (categoryLower.includes('oil') || cropLower.includes('sesame') || cropLower.includes('seed')) {
-    avatar = '🌻';
-  } else if (cropLower.includes('tea')) {
-    avatar = '🍃';
-  }
-  
+  if (!pool) return { farmer: 'Unknown', crop: 'Unknown', region: 'Unknown', category: 'Other', apr: '0.0%' };
   return {
     farmer: pool.account.estateName || `Farm ${pool.account.authority.toBase58().slice(0, 4)}`,
     crop: pool.account.cropName || 'Unknown Crop',
     region: pool.account.region || 'Decentralized',
-    avatar,
-    apr,
-    category
+    category: pool.account.category || 'Other',
+    apr: pool.account.apr ? `${(pool.account.apr / 100).toFixed(1)}%` : '0.0%',
   };
 };
 
-const getStatusLabelAndColor = (status: any) => {
-  if (!status) return { label: '● Pool Open', style: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' };
-  if (status.open !== undefined) return { label: '● Pool Open', style: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' };
-  if (status.farming !== undefined) return { label: '🌾 Farming', style: 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400' };
-  if (status.settled !== undefined) return { label: '✅ Settled', style: 'bg-teal-500/10 border-teal-500/30 text-teal-400' };
-  if (status.defaulted !== undefined) return { label: '⚠️ Defaulted', style: 'bg-red-500/10 border-red-500/30 text-red-400' };
-  return { label: 'Unknown', style: 'bg-slate-500/10 border-slate-500/30 text-slate-400' };
+const getStatusConfig = (status: any) => {
+  if (!status || status.open !== undefined) return { label: 'Pool Open', color: '#22c55e', bg: 'rgba(34,197,94,0.1)' };
+  if (status.farming !== undefined)  return { label: 'Farming',   color: '#f59e0b', bg: 'rgba(245,158,11,0.1)' };
+  if (status.settled !== undefined)  return { label: 'Settled',   color: '#888888', bg: 'rgba(136,136,136,0.1)' };
+  if (status.defaulted !== undefined) return { label: 'Defaulted', color: '#ef4444', bg: 'rgba(239,68,68,0.1)' };
+  return { label: 'Unknown', color: '#666', bg: 'rgba(102,102,102,0.1)' };
 };
 
-const deriveGoal = (pool: OnChainPool) =>
-  pool.account.totalYieldKg.toNumber() * pool.account.pricePerKg.toNumber();
-
-const pct = (funded: number, goal: number) =>
-  goal > 0 ? Math.min((funded / goal) * 100, 100) : 0;
-
-const toUsdc = (microUsdc: number) => microUsdc / 1_000_000;
+const deriveGoal = (pool: OnChainPool) => pool.account.totalYieldKg.toNumber() * pool.account.pricePerKg.toNumber();
+const pct = (funded: number, goal: number) => goal > 0 ? Math.min((funded / goal) * 100, 100) : 0;
+const toUsdc = (v: number) => v / 1_000_000;
 
 interface Investment {
   pool: OnChainPool;
@@ -82,216 +53,197 @@ export default function PortfolioPage() {
   const [isFetching, setIsFetching] = useState(false);
 
   const fetchMyInvestments = useCallback(async () => {
-    if (!connection || !publicKey || !isReady) {
-      setMyInvestments([]);
-      return;
-    }
+    if (!connection || !publicKey || !isReady) { setMyInvestments([]); return; }
     setIsFetching(true);
     try {
       const livePools = await fetchAllPools();
-      const response = await connection.getParsedTokenAccountsByOwner(
-        publicKey,
-        { programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') }
-      );
-
+      const response = await connection.getParsedTokenAccountsByOwner(publicKey, { programId: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') });
       const balancesMap = new Map<string, number>();
-      for (const accountInfo of response.value) {
-        const parsedInfo = accountInfo.account.data.parsed.info;
-        const mint = parsedInfo.mint;
-        const balance = parsedInfo.tokenAmount.uiAmount ?? 0;
-        if (balance > 0) {
-          balancesMap.set(mint, balance);
-        }
+      for (const ai of response.value) {
+        const info = ai.account.data.parsed.info;
+        const bal = info.tokenAmount.uiAmount ?? 0;
+        if (bal > 0) balancesMap.set(info.mint, bal);
       }
-
       const investmentsList: Investment[] = [];
       for (const pool of livePools) {
-        const receiptMintStr = pool.account.receiptMint.toBase58();
-        if (balancesMap.has(receiptMintStr)) {
-          const balance = balancesMap.get(receiptMintStr)!;
-          const meta = getPoolMeta(pool);
-          investmentsList.push({ pool, balance, meta });
-        }
+        const mintStr = pool.account.receiptMint.toBase58();
+        if (balancesMap.has(mintStr)) investmentsList.push({ pool, balance: balancesMap.get(mintStr)!, meta: getPoolMeta(pool) });
       }
       setMyInvestments(investmentsList);
-    } catch (e) {
-      console.error("Error fetching investments:", e);
-    } finally {
-      setIsFetching(false);
-    }
+    } catch (e) { console.error('Error fetching investments:', e); }
+    finally { setIsFetching(false); }
   }, [connection, publicKey, isReady, fetchAllPools]);
 
-  useEffect(() => {
-    fetchMyInvestments();
-  }, [fetchMyInvestments]);
+  useEffect(() => { fetchMyInvestments(); }, [fetchMyInvestments]);
+
+  /* ── Aggregate stats ── */
+  const totalBalance = myInvestments.reduce((sum, inv) => sum + inv.balance, 0);
+  const totalFundedUsd = myInvestments.reduce((sum, inv) => sum + toUsdc(inv.pool.account.totalFundedUsdc.toNumber()), 0);
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-      {/* Header section */}
-      <div className="mb-8 border-b border-slate-800/60 pb-6">
-        <h1 className="text-2xl font-black text-white tracking-tight sm:text-3xl flex items-center gap-3">
-          <span>💼</span> My Investments
-        </h1>
-        <p className="mt-1.5 text-sm text-slate-400">
-          Track and manage your tokenized real-world agriculture positions.
-        </p>
+    <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '32px 24px' }}>
+
+      {/* Page header */}
+      <div style={{ marginBottom: '32px' }}>
+        <div style={{ fontSize: '11px', fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '8px' }}>
+          My Positions
+        </div>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: '16px' }}>
+          <div>
+            <h1 style={{ fontSize: '28px', fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--text-primary)', lineHeight: 1 }}>
+              Investment Portfolio
+            </h1>
+            <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginTop: '8px' }}>
+              Track and manage your tokenized real-world agriculture positions.
+            </p>
+          </div>
+          {/* Aggregate stats */}
+          {myInvestments.length > 0 && (
+            <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+              {[
+                { label: 'Positions', value: myInvestments.length.toString() },
+                { label: 'Total Tokens', value: totalBalance.toLocaleString(undefined, { maximumFractionDigits: 2 }) },
+                { label: 'Total Funded', value: `$${totalFundedUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}` },
+              ].map(s => (
+                <div key={s.label} style={{ padding: '12px 18px', borderRadius: '12px', border: '1px solid var(--border)', background: 'var(--bg-card)', minWidth: '100px' }}>
+                  <p style={{ fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: '4px' }}>{s.label}</p>
+                  <p style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{s.value}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Connection Guard */}
+      {/* Wallet disconnected */}
       {!connected && (
-        <div className="rounded-2xl border border-slate-700/40 bg-slate-800/20 p-10 text-center backdrop-blur-sm max-w-xl mx-auto my-12">
-          <span className="text-4xl mb-4 block">🔌</span>
-          <h3 className="font-bold text-white text-base mb-2">Wallet Disconnected</h3>
-          <p className="text-xs text-slate-400 mb-6 leading-relaxed">
-            Connect your wallet using the button in the top navigation bar to view your active agriculture investments and yield payouts.
+        <div style={{ maxWidth: '480px', margin: '80px auto', padding: '48px 32px', textAlign: 'center', borderRadius: 'var(--card-radius)', border: '1px solid var(--border)', background: 'var(--bg-card)' }}>
+          <div style={{ width: 48, height: 48, borderRadius: '12px', background: 'var(--bg-surface)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', fontSize: '22px' }}>
+            ⊡
+          </div>
+          <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.01em', marginBottom: '8px' }}>Wallet Disconnected</h3>
+          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+            Connect your wallet to view your active agriculture investments and yield payouts.
           </p>
         </div>
       )}
 
-      {/* Connected & Fetching */}
+      {/* Loading skeletons */}
       {connected && isFetching && (
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div style={{ display: 'grid', gap: '16px' }} className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
           {[1, 2, 3].map(i => (
-            <div key={i} className="animate-pulse rounded-2xl border border-slate-800 bg-slate-900/40 p-5 h-48" />
+            <div key={i} style={{ height: '280px', borderRadius: 'var(--card-radius)', border: '1px solid var(--border)', background: 'var(--bg-card)', animation: 'pulse 1.5s infinite' }} />
           ))}
         </div>
       )}
 
-      {/* Connected & No investments */}
+      {/* No investments */}
       {connected && !isFetching && myInvestments.length === 0 && (
-        <div className="rounded-2xl border border-slate-700/40 bg-slate-800/10 p-12 text-center backdrop-blur-sm max-w-xl mx-auto my-12">
-          <span className="text-4xl mb-4 block">🌾</span>
-          <h3 className="font-bold text-white text-base mb-2">You've no active investments</h3>
-          <p className="text-xs text-slate-400 mb-6 leading-relaxed">
-            You don't hold any tokenized crop receipts yet. Support local farmers and earn competitive yields by funding active agricultural pools.
+        <div style={{ maxWidth: '480px', margin: '80px auto', padding: '48px 32px', textAlign: 'center', borderRadius: 'var(--card-radius)', border: '1px solid var(--border)', background: 'var(--bg-card)' }}>
+          <div style={{ width: 48, height: 48, borderRadius: '12px', background: 'var(--bg-surface)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', fontSize: '22px', color: 'var(--text-muted)' }}>
+            ◈
+          </div>
+          <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.01em', marginBottom: '8px' }}>No Active Positions</h3>
+          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '24px' }}>
+            You don't hold any tokenized crop receipts yet. Fund active agricultural pools to earn competitive yields.
           </p>
           <Link
             href="/dashboard/investor"
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-2 text-xs font-bold text-white shadow-lg shadow-emerald-950/40 hover:from-emerald-500 hover:to-teal-400 transition-all"
+            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '12px 24px', borderRadius: '999px', background: 'var(--accent)', color: '#000', fontWeight: 700, fontSize: '13px', textDecoration: 'none', transition: 'opacity 0.2s' }}
+            onMouseEnter={e => (e.currentTarget.style.opacity = '0.9')}
+            onMouseLeave={e => (e.currentTarget.style.opacity = '1')}
           >
-            📊 Visit Investor Market
+            View Investor Marketplace
           </Link>
         </div>
       )}
 
-      {/* Connected & Has investments */}
+      {/* Investment cards */}
       {connected && !isFetching && myInvestments.length > 0 && (
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div style={{ display: 'grid', gap: '16px' }} className="grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
           {myInvestments.map(({ pool, balance, meta }) => {
-            const goalMicro   = deriveGoal(pool);
-            const fundedMicro = pool.account.totalFundedUsdc.toNumber();
-            const percentage  = pct(fundedMicro, goalMicro);
+            const goalMicro    = deriveGoal(pool);
+            const fundedMicro  = pool.account.totalFundedUsdc.toNumber();
+            const percentage   = pct(fundedMicro, goalMicro);
             const fundedUsd    = toUsdc(fundedMicro);
             const goalUsd      = toUsdc(goalMicro);
-            const { label, style } = getStatusLabelAndColor(pool.account.status);
+            const { label, color, bg } = getStatusConfig(pool.account.status);
 
             return (
-              <div 
+              <div
                 key={pool.publicKey.toBase58()}
-                className="rounded-2xl border border-slate-800/80 bg-gradient-to-b from-slate-900/60 to-slate-950/70 p-6 backdrop-blur-xl hover:border-emerald-500/30 hover:shadow-lg hover:shadow-emerald-950/5 shadow-md shadow-[#010408]/40 transition-all duration-300 flex flex-col justify-between"
+                style={{ display: 'flex', flexDirection: 'column', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 'var(--card-radius)', padding: '22px', transition: 'border-color 0.2s' }}
+                onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--border-hover)')}
+                onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
               >
-                <div>
-                  {/* Header Section */}
-                  <div className="flex items-start justify-between gap-3 mb-4">
-                    <div className="flex items-start gap-3 min-w-0 flex-1">
-                      <span className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-slate-800/80 border border-slate-700/50 text-2xl shadow-inner">
-                        {meta.avatar}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        {/* Estate Name: max 2 lines, truncated, with title tooltip */}
-                        <h3 
-                          className="font-bold text-white text-sm line-clamp-2 break-words leading-snug cursor-help"
-                          title={pool.account.estateName}
-                        >
-                          {pool.account.estateName}
-                        </h3>
-                        {/* Subtitle: Crop Name + Category */}
-                        <p className="text-[11px] text-slate-400 mt-1 font-medium tracking-wide">
-                          🌾 {meta.crop} · <span className="text-slate-500">{meta.category}</span>
-                        </p>
-                      </div>
+                {/* Card header */}
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', marginBottom: '18px' }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <h3 style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: '3px' }} title={pool.account.estateName}>
+                      {pool.account.estateName}
+                    </h3>
+                    <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                      {meta.crop} · <span style={{ color: 'var(--text-muted)' }}>{meta.category}</span>
+                    </p>
+                  </div>
+                  {/* Status badge */}
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '3px 10px', borderRadius: '999px', background: bg, color, fontSize: '11px', fontWeight: 500, border: `1px solid ${color}33`, flexShrink: 0 }}>
+                    <span style={{ width: 5, height: 5, borderRadius: '50%', background: color }} />
+                    {label}
+                  </span>
+                </div>
+
+                {/* Divider */}
+                <div style={{ height: 1, background: 'var(--border)', marginBottom: '16px' }} />
+
+                {/* Metrics 3-col */}
+                <div className="responsive-grid-3-cols" style={{ marginBottom: '18px' }}>
+                  {[
+                    { label: 'Tokens Held', value: balance.toLocaleString(undefined, { maximumFractionDigits: 2 }), color: 'var(--accent)' },
+                    { label: 'Exp. Return', value: meta.apr, color: 'var(--text-primary)' },
+                    { label: 'Location', value: meta.region, color: 'var(--text-secondary)' },
+                  ].map(m => (
+                    <div key={m.label} style={{ padding: '10px', borderRadius: '8px', background: 'var(--bg-surface)', border: '1px solid var(--border)', textAlign: 'center' }}>
+                      <p style={{ fontSize: '14px', fontWeight: 700, color: m.color, fontFamily: 'var(--font-mono)', marginBottom: '3px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={m.value}>{m.value}</p>
+                      <p style={{ fontSize: '9px', fontWeight: 500, color: 'var(--text-muted)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>{m.label}</p>
                     </div>
-                    {/* Status Badge */}
-                    <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-semibold flex-shrink-0 shadow-sm ${style}`}>
-                      {label}
+                  ))}
+                </div>
+
+                {/* Divider */}
+                <div style={{ height: 1, background: 'var(--border)', marginBottom: '16px' }} />
+
+                {/* Funding progress */}
+                <div style={{ marginBottom: '18px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <span style={{ fontSize: '12px', color: 'var(--accent)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                      ${fundedUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })} funded
+                    </span>
+                    <span style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                      ${goalUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })} goal
                     </span>
                   </div>
-
-                  {/* Divider Line */}
-                  <div className="border-t border-slate-800/60 my-4" />
-
-                  {/* Core Metrics Grid */}
-                  <div className="grid grid-cols-3 gap-2.5 mb-5 text-center">
-                    {/* Column 1: Receipt Tokens */}
-                    <div className="rounded-xl bg-slate-900/60 border border-slate-800/80 p-2.5 flex flex-col justify-between min-w-0">
-                      <p className="text-sm font-extrabold text-emerald-400 truncate">
-                        {balance.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
-                      </p>
-                      <p className="text-[9px] font-medium text-slate-500 mt-1 uppercase tracking-wider">
-                        tokens held
-                      </p>
-                    </div>
-                    
-                    {/* Column 2: Est. APR */}
-                    <div className="rounded-xl bg-slate-900/60 border border-slate-800/80 p-2.5 flex flex-col justify-between min-w-0">
-                      <p className="text-sm font-extrabold text-white truncate">
-                        {meta.apr}
-                      </p>
-                      <p className="text-[9px] font-medium text-slate-500 mt-1 uppercase tracking-wider">
-                        exp. return
-                      </p>
-                    </div>
-
-                    {/* Column 3: Location / Region */}
-                    <div className="rounded-xl bg-slate-900/60 border border-slate-800/80 p-2.5 flex flex-col justify-between min-w-0">
-                      <p className="text-xs font-bold text-slate-300 truncate" title={meta.region}>
-                        {meta.region}
-                      </p>
-                      <p className="text-[9px] font-medium text-slate-500 mt-1 uppercase tracking-wider">
-                        location
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Divider Line */}
-                  <div className="border-t border-slate-800/60 my-4" />
-
-                  {/* Funding Progress Section */}
-                  <div className="mb-6">
-                    <div className="flex justify-between text-[11px] font-medium mb-1.5">
-                      <span className="text-emerald-400">
-                        Funded: <span className="font-bold">${fundedUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-                      </span>
-                      <span className="text-slate-500">
-                        Goal: <span className="font-bold">${goalUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
-                      </span>
-                    </div>
-                    <div className="h-5 rounded-full bg-slate-800/80 p-0.5 overflow-hidden border border-slate-700/30 flex items-center">
-                      <div
-                        className="h-full rounded-full bg-gradient-to-r from-emerald-500 via-teal-400 to-teal-600 transition-all duration-500 flex items-center justify-end pr-2 min-w-[20px]"
-                        style={{ width: `${percentage}%` }}
-                      >
-                        {percentage >= 15 && (
-                          <span className="text-[9px] font-black text-slate-950 uppercase tracking-widest leading-none">
-                            {percentage.toFixed(0)}%
-                          </span>
-                        )}
-                      </div>
-                      {percentage < 15 && (
-                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest pl-2">
-                          {percentage.toFixed(0)}%
-                        </span>
+                  {/* Chunky progress bar */}
+                  <div style={{ height: '20px', borderRadius: '10px', background: 'var(--bg-surface)', border: '1px solid var(--border)', padding: '3px', overflow: 'hidden', display: 'flex', alignItems: 'center' }}>
+                    <div style={{ height: '100%', width: `${percentage}%`, borderRadius: '7px', background: 'var(--accent)', transition: 'width 0.5s ease', minWidth: percentage > 0 ? '24px' : '0', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: '6px' }}>
+                      {percentage >= 15 && (
+                        <span style={{ fontSize: '9px', fontWeight: 900, color: '#000', letterSpacing: '0.05em' }}>{percentage.toFixed(0)}%</span>
                       )}
                     </div>
+                    {percentage < 15 && (
+                      <span style={{ fontSize: '9px', fontWeight: 900, color: 'var(--text-muted)', paddingLeft: '8px', letterSpacing: '0.05em' }}>{percentage.toFixed(0)}%</span>
+                    )}
                   </div>
                 </div>
 
-                {/* Manage CTA Action Button */}
+                {/* Manage CTA */}
                 <Link
                   href={`/dashboard/investor?pool=${pool.publicKey.toBase58()}`}
-                  className="mt-auto flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-950/10 py-3 text-xs font-bold text-emerald-400 shadow-sm hover:bg-emerald-500/10 hover:border-emerald-500/40 hover:shadow-lg hover:shadow-emerald-950/20 active:scale-[0.98] transition-all duration-200"
+                  style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', padding: '11px', borderRadius: '10px', border: '1px solid var(--border)', background: 'var(--bg-surface)', color: 'var(--text-secondary)', fontSize: '12px', fontWeight: 600, textDecoration: 'none', transition: 'all 0.2s' }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(34,197,94,0.3)'; e.currentTarget.style.color = 'var(--accent)'; e.currentTarget.style.background = 'var(--accent-dim)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-secondary)'; e.currentTarget.style.background = 'var(--bg-surface)'; }}
                 >
-                  ⚙️ Manage & Claim
+                  Manage & Claim →
                 </Link>
               </div>
             );

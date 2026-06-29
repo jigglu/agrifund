@@ -1,22 +1,38 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
+import { Inter, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 import SolanaProvider from '@/components/SolanaProvider';
 
-const inter = Inter({ subsets: ['latin'] });
+const inter = Inter({
+  subsets: ['latin'],
+  variable: '--font-inter',
+  display: 'swap',
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ['latin'],
+  variable: '--font-mono',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
-  title: 'AgriFund — Agri-Fi Yield Tokenization Protocol',
-  description: 'Tokenize agricultural yield on Solana. Connect verified farming estates with institutional investors through transparent, on-chain USDC funding pools.',
-  keywords: ['Solana', 'DeFi', 'Agriculture', 'Yield', 'Tokenization', 'Web3', 'RWA'],
+  title: 'AgriFund — Real-World Asset Protocol on Solana',
+  description:
+    'Tokenize agricultural yield on Solana. KYC-verified farming estates. USDC settlement in 400ms. Parametric crop insurance — fully on-chain.',
+  keywords: ['Solana', 'DeFi', 'Agriculture', 'Yield', 'Tokenization', 'Web3', 'RWA', 'AgriFund'],
+  openGraph: {
+    title: 'AgriFund — Tokenized Agricultural Yield. On-Chain.',
+    description: 'KYC-verified farming estates. USDC settlement in 400ms. Parametric crop insurance — fully on-chain.',
+    type: 'website',
+  },
   icons: {
-    icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">🌾</text></svg>',
+    icon: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='16' fill='%2322c55e'/></svg>",
   },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`}>
       <body className={inter.className}>
         <SolanaProvider>{children}</SolanaProvider>
       </body>
