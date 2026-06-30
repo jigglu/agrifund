@@ -322,15 +322,11 @@ $ agrifund-cli invest --pool WHEAT-KE-2025 --amount 5000 USDC
         >
           {/* Logo */}
           <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: '8px', textDecoration: 'none' }}>
-            <div
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                background: 'var(--accent)',
-                boxShadow: '0 0 8px var(--accent-glow)',
-                flexShrink: 0,
-              }}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/logo.png"
+              alt="AgriFund Logo"
+              style={{ width: 32, height: 32, objectFit: 'contain', flexShrink: 0 }}
             />
             <span
               style={{
@@ -1758,14 +1754,8 @@ $ agrifund-cli invest --pool WHEAT-KE-2025 --amount 5000 USDC
         >
           {/* Logo */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                background: 'var(--accent)',
-              }}
-            />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo.png" alt="AgriFund" style={{ width: 22, height: 22, objectFit: 'contain' }} />
             <span
               style={{
                 fontSize: '14px',

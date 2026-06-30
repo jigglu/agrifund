@@ -80,7 +80,8 @@ const DashboardLayout: FC<{ children: ReactNode }> = ({ children }) => {
 
           {/* Logo */}
           <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: '8px', textDecoration: 'none', flexShrink: 0 }}>
-            <div style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', boxShadow: '0 0 8px var(--accent-glow)', flexShrink: 0 }} />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo.png" alt="AgriFund" style={{ width: 28, height: 28, objectFit: 'contain', flexShrink: 0 }} />
             <span style={{ fontSize: '15px', fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--text-primary)' }} className="hidden xs:inline">
               Agri<span style={{ color: 'var(--accent)' }}>Fund</span>
             </span>
