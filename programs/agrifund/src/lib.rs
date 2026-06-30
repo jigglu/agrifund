@@ -3,7 +3,7 @@ use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer, MintTo, Burn}
 use anchor_spl::metadata::{create_metadata_accounts_v3, CreateMetadataAccountsV3, Metadata};
 use anchor_spl::metadata::mpl_token_metadata::types::DataV2;
 
-declare_id!("9aHMiQrNfDSHSymQQWXrwniB6YtYtFQbVTJyygFiUqDE");
+declare_id!("DWEpV1dzSEocq1yHmx3qE7HfW7khmiSiBZZLxSCSXf2v");
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq)]
 pub enum PoolStatus {
@@ -114,11 +114,11 @@ pub mod agrifund {
         let signer_seeds = &[&seeds[..]];
         let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer_seeds);
 
-        // Name: "agri" + category + " Token" (capped at 32 chars)
-        let token_name = format!("agri{} Token", pool.category);
+        // Name: "agri" + pool_name + " Token" (capped at 32 chars)
+        let token_name = format!("agri{} Token", pool.crop_name);
         
-        // Symbol: "agri" + category (first 4 letters, capitalized)
-        let clean_category: String = pool.category
+        // Symbol: "agri" + pool_name (first 4 letters, capitalized)
+        let clean_pool_name: String = pool.crop_name
             .chars()
             .filter(|c| c.is_alphabetic())
             .collect::<String>()
@@ -126,7 +126,7 @@ pub mod agrifund {
             .take(4)
             .collect::<String>()
             .to_uppercase();
-        let token_symbol = format!("agri{}", clean_category);
+        let token_symbol = format!("agri{}", clean_pool_name);
 
         let data = DataV2 {
             name: token_name,

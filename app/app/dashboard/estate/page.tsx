@@ -42,25 +42,42 @@ const S = {
     width: '100%',
     padding: '11px 14px',
     borderRadius: '10px',
-    border: '1px solid var(--border)',
+    border: '1px solid rgba(255,255,255,0.1)',
     background: 'var(--bg-surface)',
     color: 'var(--text-primary)',
     fontSize: '14px',
     outline: 'none',
-    transition: 'border-color 0.2s',
+    transition: 'border-color 0.2s, box-shadow 0.2s',
     fontFamily: 'inherit',
+    boxSizing: 'border-box' as const,
   } as React.CSSProperties,
   select: {
     width: '100%',
     padding: '11px 14px',
     borderRadius: '10px',
-    border: '1px solid var(--border)',
+    border: '1px solid rgba(255,255,255,0.1)',
     background: 'var(--bg-surface)',
     color: 'var(--text-primary)',
     fontSize: '14px',
     outline: 'none',
     cursor: 'pointer',
     fontFamily: 'inherit',
+    transition: 'border-color 0.2s, box-shadow 0.2s',
+    boxSizing: 'border-box' as const,
+  } as React.CSSProperties,
+  fieldGroup: {
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: '6px',
+  } as React.CSSProperties,
+  sectionLabel: {
+    fontSize: '10px',
+    fontWeight: 600,
+    letterSpacing: '0.1em',
+    textTransform: 'uppercase' as const,
+    color: 'var(--accent)',
+    marginBottom: '4px',
+    display: 'block',
   } as React.CSSProperties,
 };
 
@@ -152,7 +169,7 @@ export default function EstatePage() {
   const [txLogs, setTxLogs] = useState<TxLog[]>([]);
   const [customEstateName, setCustomEstateName] = useState("");
   const [customCropName, setCustomCropName] = useState("");
-  const [customCategory, setCustomCategory] = useState("Grains");
+  const [customCategory, setCustomCategory] = useState("");
   const [customYieldKg, setCustomYieldKg] = useState("");
   const [customPrice, setCustomPrice] = useState("");
   const [customVestingDuration, setCustomVestingDuration] = useState("180");
@@ -215,7 +232,7 @@ export default function EstatePage() {
     try {
       const { txSig } = await initializePool(customEstateName, customCropName, customCategory, Number(customYieldKg), Math.round(Number(customPrice) * 1_000_000), Number(customVestingDuration) || 180, Math.round(Number(customApr) * 100), customRegion);
       updateLog(logId, { status: 'success', sig: txSig });
-      setCustomEstateName(""); setCustomCropName(""); setCustomCategory("Grains"); setCustomYieldKg(""); setCustomPrice(""); setCustomVestingDuration("180"); setCustomApr(""); setCustomRegion("");
+      setCustomEstateName(""); setCustomCropName(""); setCustomCategory(""); setCustomYieldKg(""); setCustomPrice(""); setCustomVestingDuration("180"); setCustomApr(""); setCustomRegion("");
       await refreshWithRetry();
     } catch (e: unknown) {
       updateLog(logId, { status: 'error', error: e instanceof Error ? e.message : String(e) });
@@ -273,8 +290,14 @@ export default function EstatePage() {
   };
 
   /* ── Input focus style helper ── */
-  const onFocus = (e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) => { e.target.style.borderColor = 'var(--accent)'; };
-  const onBlur  = (e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) => { e.target.style.borderColor = 'var(--border)'; };
+  const onFocus = (e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) => {
+    e.target.style.borderColor = 'var(--accent)';
+    e.target.style.boxShadow = '0 0 0 3px rgba(34,197,94,0.15)';
+  };
+  const onBlur  = (e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) => {
+    e.target.style.borderColor = 'rgba(255,255,255,0.1)';
+    e.target.style.boxShadow = 'none';
+  };
 
   return (
     <div style={{ maxWidth: '1400px', margin: '0 auto', padding: '32px 24px' }}>
@@ -325,95 +348,126 @@ export default function EstatePage() {
 
             {/* Create pool form */}
             <div style={S.card}>
-              <div style={{ marginBottom: '20px' }}>
+              {/* ── Form header ── */}
+              <div style={{ marginBottom: '28px' }}>
                 <div style={{ fontSize: '11px', fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--accent)', marginBottom: '8px' }}>
                   Pool Initialization
                 </div>
-                <h2 style={{ fontSize: '20px', fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--text-primary)' }}>
+                <h2 style={{ fontSize: '20px', fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--text-primary)', margin: 0 }}>
                   Create New Yield Pool
                 </h2>
-                <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '6px', marginBottom: 0, lineHeight: 1.5 }}>
                   Initialize a verified asset directly on Solana Devnet.
                 </p>
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                {/* Row 1 */}
-                <div className="responsive-grid-2-columns-gap16">
-                  <div>
-                    <label style={S.label}>Estate Name</label>
-                    <input type="text" value={customEstateName} onChange={e => setCustomEstateName(e.target.value.replace(/[^a-zA-Z0-9 ]/g, ''))} placeholder="e.g., Mendez Agro Holdings" style={S.input} onFocus={onFocus} onBlur={onBlur} />
+              {/* ── Section: Asset Details ── */}
+              <div style={{ marginBottom: '24px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+                  <span style={S.sectionLabel}>Asset Details</span>
+                  <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.07)' }} />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  {/* Estate Name + Crop Name */}
+                  <div className="responsive-grid-2-columns-gap16">
+                    <div style={S.fieldGroup}>
+                      <label style={S.label}>Estate Name</label>
+                      <input type="text" value={customEstateName} onChange={e => setCustomEstateName(e.target.value.replace(/[^a-zA-Z0-9 ]/g, ''))} placeholder="e.g., Mendez Agro Holdings" style={S.input} onFocus={onFocus} onBlur={onBlur} />
+                    </div>
+                    <div style={S.fieldGroup}>
+                      <label style={S.label}>Crop Name</label>
+                      <input type="text" value={customCropName} onChange={e => setCustomCropName(e.target.value.replace(/[^a-zA-Z0-9 ]/g, ''))} placeholder="e.g., Mexican Arabica Coffee" style={S.input} onFocus={onFocus} onBlur={onBlur} />
+                    </div>
                   </div>
-                  <div>
-                    <label style={S.label}>Crop Name</label>
-                    <input type="text" value={customCropName} onChange={e => setCustomCropName(e.target.value.replace(/[^a-zA-Z0-9 ]/g, ''))} placeholder="e.g., Mexican Arabica Coffee" style={S.input} onFocus={onFocus} onBlur={onBlur} />
+                  {/* Category + Region */}
+                  <div className="responsive-grid-2-columns-gap16">
+                    <div style={S.fieldGroup}>
+                      <label style={S.label}>Category</label>
+                      <input type="text" value={customCategory} onChange={e => setCustomCategory(e.target.value.replace(/[^a-zA-Z0-9 ]/g, ''))} placeholder="e.g., Spices, Pulses, Dairy" style={S.input} onFocus={onFocus} onBlur={onBlur} />
+                    </div>
+                    <div style={S.fieldGroup}>
+                      <label style={S.label}>Region</label>
+                      <input type="text" value={customRegion} onChange={e => setCustomRegion(e.target.value)} placeholder="e.g., Kano, Nigeria" style={S.input} onFocus={onFocus} onBlur={onBlur} />
+                    </div>
                   </div>
                 </div>
-
-                {/* Category */}
-                <div>
-                  <label style={S.label}>Category</label>
-                  <select value={customCategory} onChange={e => setCustomCategory(e.target.value)} style={S.select} onFocus={onFocus} onBlur={onBlur}>
-                    <option value="Grains">Grains</option>
-                    <option value="Coffee">Coffee</option>
-                    <option value="Oils">Oils</option>
-                  </select>
-                </div>
-
-                {/* Row 2 */}
-                <div className="responsive-grid-2-columns-gap16">
-                  <div>
-                    <label style={S.label}>Total Yield (kg)</label>
-                    <input type="number" value={customYieldKg} onChange={e => setCustomYieldKg(e.target.value)} placeholder="e.g., 5000" style={S.input} onFocus={onFocus} onBlur={onBlur} />
-                  </div>
-                  <div>
-                    <label style={S.label}>Price per kg ($)</label>
-                    <input type="number" step="0.01" value={customPrice} onChange={e => setCustomPrice(e.target.value)} placeholder="e.g., 2.50" style={S.input} onFocus={onFocus} onBlur={onBlur} />
-                  </div>
-                </div>
-
-                {/* Vesting */}
-                <div>
-                  <label style={S.label}>Vesting Duration (seconds)</label>
-                  <input type="number" value={customVestingDuration} onChange={e => setCustomVestingDuration(e.target.value)} placeholder="e.g., 180" style={S.input} onFocus={onFocus} onBlur={onBlur} />
-                </div>
-
-                {/* Row 3 */}
-                <div className="responsive-grid-2-columns-gap16">
-                  <div>
-                    <label style={S.label}>Estimated APR (%)</label>
-                    <input type="number" step="0.1" value={customApr} onChange={e => setCustomApr(e.target.value)} placeholder="e.g., 12.5" style={S.input} onFocus={onFocus} onBlur={onBlur} />
-                  </div>
-                  <div>
-                    <label style={S.label}>Region</label>
-                    <input type="text" value={customRegion} onChange={e => setCustomRegion(e.target.value)} placeholder="e.g., Kano, Nigeria" style={S.input} onFocus={onFocus} onBlur={onBlur} />
-                  </div>
-                </div>
-
-                {/* Submit */}
-                <button
-                  onClick={handleInitializeCustomPool}
-                  disabled={!isReady || isInitializing || !customEstateName || !customCropName || !customYieldKg || !customPrice || !customVestingDuration || !customApr || !customRegion}
-                  style={{
-                    marginTop: '8px',
-                    width: '100%',
-                    padding: '14px',
-                    borderRadius: '999px',
-                    background: 'var(--accent)',
-                    color: '#000',
-                    fontSize: '14px',
-                    fontWeight: 700,
-                    border: 'none',
-                    cursor: 'pointer',
-                    transition: 'opacity 0.2s, transform 0.2s',
-                    opacity: (!isReady || isInitializing || !customEstateName || !customCropName || !customYieldKg || !customPrice || !customVestingDuration || !customApr || !customRegion) ? 0.35 : 1,
-                  }}
-                  onMouseEnter={e => { e.currentTarget.style.opacity = '0.9'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
-                  onMouseLeave={e => { e.currentTarget.style.opacity = '1'; e.currentTarget.style.transform = 'translateY(0)'; }}
-                >
-                  {isInitializing ? 'Executing Transaction…' : 'Initialize Pool on Devnet'}
-                </button>
               </div>
+
+              {/* ── Section: Yield Economics ── */}
+              <div style={{ marginBottom: '24px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+                  <span style={S.sectionLabel}>Yield Economics</span>
+                  <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.07)' }} />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  {/* Total Yield + Price Per Kg */}
+                  <div className="responsive-grid-2-columns-gap16">
+                    <div style={S.fieldGroup}>
+                      <label style={S.label}>Total Yield (kg)</label>
+                      <input type="number" value={customYieldKg} onChange={e => setCustomYieldKg(e.target.value)} placeholder="e.g., 5000" style={S.input} onFocus={onFocus} onBlur={onBlur} />
+                    </div>
+                    <div style={S.fieldGroup}>
+                      <label style={S.label}>Price per kg ($)</label>
+                      <input type="number" step="0.01" value={customPrice} onChange={e => setCustomPrice(e.target.value)} placeholder="e.g., 2.50" style={S.input} onFocus={onFocus} onBlur={onBlur} />
+                    </div>
+                  </div>
+                  {/* Vesting Duration + APR */}
+                  <div className="responsive-grid-2-columns-gap16">
+                    <div style={S.fieldGroup}>
+                      <label style={S.label}>Vesting Duration (secs)</label>
+                      <input type="number" value={customVestingDuration} onChange={e => setCustomVestingDuration(e.target.value)} placeholder="e.g., 180" style={S.input} onFocus={onFocus} onBlur={onBlur} />
+                    </div>
+                    <div style={S.fieldGroup}>
+                      <label style={S.label}>Estimated APR (%)</label>
+                      <input type="number" step="0.1" value={customApr} onChange={e => setCustomApr(e.target.value)} placeholder="e.g., 12.5" style={S.input} onFocus={onFocus} onBlur={onBlur} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Submit ── */}
+              <button
+                onClick={handleInitializeCustomPool}
+                disabled={!isReady || isInitializing || !customEstateName || !customCropName || !customYieldKg || !customPrice || !customVestingDuration || !customApr || !customRegion}
+                style={{
+                  width: '100%',
+                  padding: '14px',
+                  borderRadius: '999px',
+                  background: 'var(--accent)',
+                  color: '#000',
+                  fontSize: '14px',
+                  fontWeight: 700,
+                  border: 'none',
+                  cursor: (!isReady || isInitializing || !customEstateName || !customCropName || !customYieldKg || !customPrice || !customVestingDuration || !customApr || !customRegion) ? 'not-allowed' : 'pointer',
+                  transition: 'opacity 0.15s, transform 0.15s, background-color 0.15s',
+                  opacity: (!isReady || isInitializing || !customEstateName || !customCropName || !customYieldKg || !customPrice || !customVestingDuration || !customApr || !customRegion) ? 0.35 : 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                }}
+                onMouseEnter={e => {
+                  if (!e.currentTarget.disabled) {
+                    e.currentTarget.style.backgroundColor = 'hsl(142, 76%, 42%)';
+                    e.currentTarget.style.transform = 'translateY(-1px)';
+                  }
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.backgroundColor = 'var(--accent)';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                }}
+                onMouseDown={e => { e.currentTarget.style.transform = 'translateY(0) scale(0.98)'; e.currentTarget.style.opacity = '0.85'; }}
+                onMouseUp={e => { e.currentTarget.style.transform = 'translateY(-1px) scale(1)'; e.currentTarget.style.opacity = '1'; }}
+              >
+                {isInitializing ? (
+                  <>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ animation: 'spin 0.8s linear infinite', flexShrink: 0 }}>
+                      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                    </svg>
+                    Executing Transaction…
+                  </>
+                ) : 'Initialize Pool on Devnet'}
+              </button>
             </div>
 
             {/* Active Admin Pools */}

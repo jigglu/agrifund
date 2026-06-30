@@ -131,6 +131,12 @@ body {
   50%       { opacity: 0.4; }
 }
 
+/* Spinner rotation for loading states */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
    UTILITY CLASSES (used by page.tsx)
    ───────────────────────────────────────────────────────────────────────── */
