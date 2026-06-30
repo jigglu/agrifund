@@ -1,21 +1,35 @@
-'use client';
+"use client";
 
-import { useMemo, useCallback } from 'react';
-import { useConnection, useAnchorWallet } from '@solana/wallet-adapter-react';
+import { useMemo, useCallback } from "react";
+import { useConnection, useAnchorWallet } from "@solana/wallet-adapter-react";
 import {
   Program,
   AnchorProvider,
   BN,
   setProvider,
   Idl,
-} from '@coral-xyz/anchor';
-import { Keypair, PublicKey, SystemProgram, SYSVAR_CLOCK_PUBKEY, SYSVAR_RENT_PUBKEY } from '@solana/web3.js';
-import { getAssociatedTokenAddress, TOKEN_PROGRAM_ID, createAssociatedTokenAccountInstruction } from '@solana/spl-token';
-import IDL from '@/lib/agrifund.json';
+} from "@coral-xyz/anchor";
+import {
+  Keypair,
+  PublicKey,
+  SystemProgram,
+  SYSVAR_CLOCK_PUBKEY,
+  SYSVAR_RENT_PUBKEY,
+} from "@solana/web3.js";
+import {
+  getAssociatedTokenAddress,
+  TOKEN_PROGRAM_ID,
+  createAssociatedTokenAccountInstruction,
+} from "@solana/spl-token";
+import IDL from "@/lib/agrifund.json";
 
 // Our custom devnet SPL token used to simulate USDC
-export const AGRIUSD_MINT = new PublicKey('G7q4wCAJ422kER19HKbDJ23vSJ3nzcJ1FnZG3yGgwnnL');
-export const TOKEN_METADATA_PROGRAM_ID = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
+export const AGRIUSD_MINT = new PublicKey(
+  "G7q4wCAJ422kER19HKbDJ23vSJ3nzcJ1FnZG3yGgwnnL"
+);
+export const TOKEN_METADATA_PROGRAM_ID = new PublicKey(
+  "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+);
 
 // ── Type helpers derived from the IDL ─────────────────────────────────────
 
@@ -67,8 +81,8 @@ export function useAgriFund() {
     if (!wallet) return null;
 
     const provider = new AnchorProvider(connection, wallet, {
-      commitment: 'confirmed',
-      preflightCommitment: 'confirmed',
+      commitment: "confirmed",
+      preflightCommitment: "confirmed",
     });
     setProvider(provider);
 
@@ -84,23 +98,32 @@ export function useAgriFund() {
    * @returns          { txSig, poolAddress } on success
    */
   const initializePool = useCallback(
-    async (estateName: string, cropName: string, category: string, yieldKg: number, priceUsdc: number, vestingDuration: number, apr: number, region: string): Promise<InitPoolResult> => {
+    async (
+      estateName: string,
+      cropName: string,
+      category: string,
+      yieldKg: number,
+      priceUsdc: number,
+      vestingDuration: number,
+      apr: number,
+      region: string
+    ): Promise<InitPoolResult> => {
       if (!program || !wallet) {
-        throw new Error('Wallet not connected');
+        throw new Error("Wallet not connected");
       }
 
       const poolKeypair = Keypair.generate();
       const [vaultPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('vault'), poolKeypair.publicKey.toBuffer()],
+        [Buffer.from("vault"), poolKeypair.publicKey.toBuffer()],
         program.programId
       );
       const [receiptMintPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('receipt_mint'), poolKeypair.publicKey.toBuffer()],
+        [Buffer.from("receipt_mint"), poolKeypair.publicKey.toBuffer()],
         program.programId
       );
       const [metadataPda] = PublicKey.findProgramAddressSync(
         [
-          Buffer.from('metadata'),
+          Buffer.from("metadata"),
           TOKEN_METADATA_PROGRAM_ID.toBuffer(),
           receiptMintPda.toBuffer(),
         ],
@@ -151,20 +174,26 @@ export function useAgriFund() {
       amountUsdc: number
     ): Promise<FundYieldResult> => {
       if (!program || !wallet) {
-        throw new Error('Wallet not connected');
+        throw new Error("Wallet not connected");
       }
 
-      const investorAta = await getAssociatedTokenAddress(AGRIUSD_MINT, wallet.publicKey);
+      const investorAta = await getAssociatedTokenAddress(
+        AGRIUSD_MINT,
+        wallet.publicKey
+      );
       const [vaultPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('vault'), targetPoolAddress.toBuffer()],
+        [Buffer.from("vault"), targetPoolAddress.toBuffer()],
         program.programId
       );
       const [receiptMintPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('receipt_mint'), targetPoolAddress.toBuffer()],
+        [Buffer.from("receipt_mint"), targetPoolAddress.toBuffer()],
         program.programId
       );
 
-      const investorReceiptAta = await getAssociatedTokenAddress(receiptMintPda, wallet.publicKey);
+      const investorReceiptAta = await getAssociatedTokenAddress(
+        receiptMintPda,
+        wallet.publicKey
+      );
 
       const instructions = [];
       const ataInfo = await connection.getAccountInfo(investorReceiptAta);
@@ -215,12 +244,15 @@ export function useAgriFund() {
       amountUsdc: number
     ): Promise<{ txSig: string }> => {
       if (!program || !wallet) {
-        throw new Error('Wallet not connected');
+        throw new Error("Wallet not connected");
       }
 
-      const estateAta = await getAssociatedTokenAddress(AGRIUSD_MINT, wallet.publicKey);
+      const estateAta = await getAssociatedTokenAddress(
+        AGRIUSD_MINT,
+        wallet.publicKey
+      );
       const [vaultPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('vault'), targetPoolAddress.toBuffer()],
+        [Buffer.from("vault"), targetPoolAddress.toBuffer()],
         program.programId
       );
 
@@ -250,12 +282,15 @@ export function useAgriFund() {
       repaymentAmountUsdc: number
     ): Promise<{ txSig: string }> => {
       if (!program || !wallet) {
-        throw new Error('Wallet not connected');
+        throw new Error("Wallet not connected");
       }
 
-      const estateAta = await getAssociatedTokenAddress(AGRIUSD_MINT, wallet.publicKey);
+      const estateAta = await getAssociatedTokenAddress(
+        AGRIUSD_MINT,
+        wallet.publicKey
+      );
       const [vaultPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('vault'), targetPoolAddress.toBuffer()],
+        [Buffer.from("vault"), targetPoolAddress.toBuffer()],
         program.programId
       );
 
@@ -279,23 +314,27 @@ export function useAgriFund() {
    * claimYield — claim proportional yield from settled pool.
    */
   const claimYield = useCallback(
-    async (
-      targetPoolAddress: PublicKey
-    ): Promise<{ txSig: string }> => {
+    async (targetPoolAddress: PublicKey): Promise<{ txSig: string }> => {
       if (!program || !wallet) {
-        throw new Error('Wallet not connected');
+        throw new Error("Wallet not connected");
       }
 
-      const investorAta = await getAssociatedTokenAddress(AGRIUSD_MINT, wallet.publicKey);
+      const investorAta = await getAssociatedTokenAddress(
+        AGRIUSD_MINT,
+        wallet.publicKey
+      );
       const [vaultPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('vault'), targetPoolAddress.toBuffer()],
+        [Buffer.from("vault"), targetPoolAddress.toBuffer()],
         program.programId
       );
       const [receiptMintPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('receipt_mint'), targetPoolAddress.toBuffer()],
+        [Buffer.from("receipt_mint"), targetPoolAddress.toBuffer()],
         program.programId
       );
-      const investorReceiptAta = await getAssociatedTokenAddress(receiptMintPda, wallet.publicKey);
+      const investorReceiptAta = await getAssociatedTokenAddress(
+        receiptMintPda,
+        wallet.publicKey
+      );
 
       const txSig = await (program.methods as any)
         .claimYield()
@@ -319,15 +358,13 @@ export function useAgriFund() {
    * triggerDefault — simulate weather oracle drought trigger.
    */
   const triggerDefault = useCallback(
-    async (
-      targetPoolAddress: PublicKey
-    ): Promise<{ txSig: string }> => {
+    async (targetPoolAddress: PublicKey): Promise<{ txSig: string }> => {
       if (!program || !wallet) {
-        throw new Error('Wallet not connected');
+        throw new Error("Wallet not connected");
       }
 
       const [oraclePda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('oracle')],
+        [Buffer.from("oracle")],
         program.programId
       );
 
@@ -354,19 +391,25 @@ export function useAgriFund() {
       refundAmountUsdc: number
     ): Promise<{ txSig: string }> => {
       if (!program || !wallet) {
-        throw new Error('Wallet not connected');
+        throw new Error("Wallet not connected");
       }
 
-      const investorAta = await getAssociatedTokenAddress(AGRIUSD_MINT, wallet.publicKey);
+      const investorAta = await getAssociatedTokenAddress(
+        AGRIUSD_MINT,
+        wallet.publicKey
+      );
       const [vaultPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('vault'), targetPoolAddress.toBuffer()],
+        [Buffer.from("vault"), targetPoolAddress.toBuffer()],
         program.programId
       );
       const [receiptMintPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from('receipt_mint'), targetPoolAddress.toBuffer()],
+        [Buffer.from("receipt_mint"), targetPoolAddress.toBuffer()],
         program.programId
       );
-      const investorReceiptAta = await getAssociatedTokenAddress(receiptMintPda, wallet.publicKey);
+      const investorReceiptAta = await getAssociatedTokenAddress(
+        receiptMintPda,
+        wallet.publicKey
+      );
 
       const txSig = await (program.methods as any)
         .refundInvestment(new BN(refundAmountUsdc))
@@ -391,7 +434,7 @@ export function useAgriFund() {
    */
   const fetchPool = useCallback(
     async (poolAddress: PublicKey): Promise<YieldPoolAccount> => {
-      if (!program) throw new Error('Wallet not connected');
+      if (!program) throw new Error("Wallet not connected");
       const raw = await (program.account as any).yieldPool.fetch(poolAddress);
       return raw as YieldPoolAccount;
     },
@@ -402,40 +445,35 @@ export function useAgriFund() {
    * fetchMyPools — fetch all on-chain YieldPool accounts owned by the
    * currently connected wallet.  Returns an array of pool PublicKeys.
    */
-  const fetchMyPools = useCallback(
-    async (): Promise<PublicKey[]> => {
-      if (!program || !wallet) return [];
-      try {
-        const allPools = await (program.account as any).yieldPool.all();
-        return allPools
-          .filter((p: { account: { authority: PublicKey } }) =>
+  const fetchMyPools = useCallback(async (): Promise<PublicKey[]> => {
+    if (!program || !wallet) return [];
+    try {
+      const allPools = await (program.account as any).yieldPool.all();
+      return allPools
+        .filter(
+          (p: { account: { authority: PublicKey } }) =>
             p.account.authority.toBase58() === wallet.publicKey.toBase58()
-          )
-          .map((p: { publicKey: PublicKey }) => p.publicKey as PublicKey);
-      } catch {
-        return [];
-      }
-    },
-    [program, wallet]
-  );
+        )
+        .map((p: { publicKey: PublicKey }) => p.publicKey as PublicKey);
+    } catch {
+      return [];
+    }
+  }, [program, wallet]);
 
   /**
    * fetchAllPools — fetch every YieldPool account on-chain.
    * Returns a typed array of { publicKey, account } entries.
    * Caller does not need a connected wallet (read-only query).
    */
-  const fetchAllPools = useCallback(
-    async (): Promise<OnChainPool[]> => {
-      if (!program) return [];
-      try {
-        const raw = await (program.account as any).yieldPool.all();
-        return raw as OnChainPool[];
-      } catch {
-        return [];
-      }
-    },
-    [program]
-  );
+  const fetchAllPools = useCallback(async (): Promise<OnChainPool[]> => {
+    if (!program) return [];
+    try {
+      const raw = await (program.account as any).yieldPool.all();
+      return raw as OnChainPool[];
+    } catch {
+      return [];
+    }
+  }, [program]);
 
   return {
     program,
