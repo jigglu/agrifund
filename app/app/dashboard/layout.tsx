@@ -71,11 +71,11 @@ const DashboardLayout: FC<{ children: ReactNode }> = ({ children }) => {
         <div style={{
           maxWidth: '1400px',
           margin: '0 auto',
-          padding: '0 16px',
+          padding: '0 clamp(8px, 2vw, 16px)',
           height: '60px',
           display: 'flex',
           alignItems: 'center',
-          gap: '12px',
+          gap: 'clamp(6px, 1.5vw, 12px)',
         }} className="sm:px-6">
 
           {/* Logo */}
@@ -101,9 +101,9 @@ const DashboardLayout: FC<{ children: ReactNode }> = ({ children }) => {
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    padding: '6px 10px',
+                    padding: '6px clamp(6px, 1.5vw, 10px)',
                     borderRadius: '999px',
-                    fontSize: '12px',
+                    fontSize: 'clamp(11px, 2.8vw, 12px)',
                     fontWeight: active ? 500 : 400,
                     color: active ? 'var(--text-primary)' : 'var(--text-secondary)',
                     background: active ? 'rgba(255,255,255,0.06)' : 'transparent',
@@ -200,11 +200,14 @@ const DashboardLayout: FC<{ children: ReactNode }> = ({ children }) => {
               background: 'var(--accent)',
               color: '#000',
               borderRadius: '999px',
-              fontSize: '12px',
+              fontSize: 'clamp(11px, 2.8vw, 12px)',
               fontWeight: 700,
               height: '34px',
-              padding: '0 14px',
+              lineHeight: '34px',
+              padding: '0 clamp(10px, 2.5vw, 14px)',
               border: 'none',
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
             }} />
           )}
         </div>

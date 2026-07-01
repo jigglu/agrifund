@@ -273,6 +273,12 @@ nav.scrolled {
   font-weight: 600 !important;
 }
 
+@media (max-width: 480px) {
+  .wallet-adapter-button-start-icon {
+    display: none !important;
+  }
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
    REDUCED MOTION
    ───────────────────────────────────────────────────────────────────────── */
